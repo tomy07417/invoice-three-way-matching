@@ -1,0 +1,10 @@
+*
+!package.json
+!pnpm-workspace.yaml
+!pnpm-lock.yaml
+!frontend/
+!frontend/package.json
+!frontend/tsconfig.json
+!frontend/next-env.d.ts
+!frontend/app/
+!frontend/app/**
