@@ -1,6 +1,7 @@
 """Exercise the API through real HTTP without an additional HTTP client dependency."""
 
 import json
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -12,8 +13,13 @@ from urllib.request import urlopen
 import pytest
 
 
-@pytest.fixture(scope="module")
-def api_url():
+@pytest.fixture(scope="module", params=[None, "not-a-url-with-synthetic-secret", "postgresql+psycopg://test:synthetic-secret@127.0.0.1:1/test_unavailable"])
+def api_url(request):
+    environment = os.environ.copy()
+    for key in ("DATABASE_URL", "POSTGRES_HOST", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_PORT"):
+        environment.pop(key, None)
+    if request.param is not None:
+        environment["DATABASE_URL"] = request.param
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
@@ -21,6 +27,7 @@ def api_url():
     process = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port)],
         cwd=Path(__file__).resolve().parents[1],
+        env=environment,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
@@ -62,4 +69,13 @@ def test_unknown_route(api_url):
     assert error.value.code == 404
     assert error.value.headers.get_content_type() == "application/json"
     assert json.load(error.value) == {"detail": "Not Found"}
+    error.value.close()
+
+
+def test_query_database_unavailable_is_safe(api_url):
+    with pytest.raises(HTTPError) as error:
+        urlopen(f"{api_url}/purchase-orders/PO-2026-0102", timeout=3)
+    assert error.value.code == 503
+    assert error.value.headers.get_content_type() == "application/json"
+    assert json.load(error.value) == {"detail": "Database unavailable"}
     error.value.close()

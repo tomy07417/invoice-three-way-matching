@@ -1,6 +1,6 @@
 # Invoice Three-Way Matching
 
-Local monorepo: Next.js UI, FastAPI API, PostgreSQL, and explicit schema migrations. Domain entities, persistence tables, and the reference-data import CLI are implemented; read-only PO queries and invoice business logic remain future work. See the [architecture](docs/ARCHITECTURE.md) for the backend dependency boundaries.
+Local monorepo: Next.js UI, FastAPI API, PostgreSQL, and explicit schema migrations. Domain entities, persistence tables, the reference-data import CLI, and read-only PO queries are implemented; invoice business logic is not implemented yet. See the [architecture](docs/ARCHITECTURE.md) for the backend dependency boundaries.
 
 ## Quick start with Docker Compose
 
@@ -81,6 +81,20 @@ A repeat prints inserted `0` and unchanged `6`, `10`, `11` respectively. Success
 
 **Validation boundary:** Objects require exactly the domain fields. JSON duplicate fields, malformed arrays/objects, wrong field types, invalid `YYYY-MM-DD` dates, nonfinite numbers, and booleans used as numbers are rejected. Quantities/prices are parsed exactly as Decimal, with no added negativity, supplier-activity, PO-status, or payment limits.
 
+## Query a purchase order
+
+After explicitly migrating and importing reference data, query the running backend:
+
+```sh
+curl --fail http://127.0.0.1:8000/purchase-orders/PO-2026-0102
+```
+
+`GET /purchase-orders/{po_number}` returns HTTP 200 with `po_number`, `supplier_id`, `po_date` (ISO `YYYY-MM-DD`), `currency`, `status`, and `lines` sorted by `line_number`. Each line contains `line_number`, `item_code`, `description`, `quantity_ordered`, `unit_price`, and `quantity_received`. All quantities and prices are JSON **strings**, preserving exact Decimal values without float conversion. For the supplied PO-2026-0102, received quantities are `"15"` and `"30"`; PO-2026-0107 receives `"8"` of `"10"` ordered.
+
+Received quantity is the sum across all GRNs for that PO and its local line number. Ordered lines with no receipts remain present with `"0"`. This is a reference-data read, not a matching/payment decision: it does not subtract prior invoices or enforce supplier/PO status policy.
+
+Unknown POs return HTTP 404 with `{"detail":"Purchase order not found"}`. Missing/invalid database configuration or database read failures return HTTP 503 with `{"detail":"Database unavailable"}`, without connection/SQL details. Database configuration and connections are lazy at query time: `/health` and unknown routes remain available without a configured database. API startup and reads never migrate, import, or write reference data. Interactive response schemas are available at `/docs`.
+
 ## Verification
 
 From the repository root after dependency installation:
@@ -98,7 +112,9 @@ Persistence integration tests skip unless `TEST_DATABASE_URL` points to an expli
 Reader checks: `backend/.venv/bin/python -m pytest backend/tests/test_reference_reader.py -q`.
 With the same isolated `TEST_DATABASE_URL` exported, run public import integration checks using `backend/.venv/bin/python -m pytest backend/tests/test_reference_import.py -q`. These tests invoke the CLI, copy inputs into pytest temporary directories, and prove failed batches leave no persisted additions via repaired-batch inserted counts and repeat-import no-ops, without inspecting ORM internals.
 
-The backend tests start a bounded, temporary Uvicorn subprocess on a random loopback port, assert health status/content type/JSON and unknown-route 404 behavior, and stop the process. They require neither PostgreSQL nor an extra HTTP client library.
+With the isolated `TEST_DATABASE_URL` exported, run `backend/.venv/bin/python -m pytest backend/tests/test_purchase_order_query.py -q`. Query tests seed unique databases through the public importer CLI and use real HTTP to verify cross-GRN sums, partial receipts, PO-local isolation, zero receipts, ordering, exact decimals, safe unknown identities, repeat-import stability, and rejected-import preservation. They do not inspect ORM storage.
+
+The health tests cover absent, malformed, and unreachable database configuration (including safe query 503 responses). They start a bounded, temporary Uvicorn subprocess on a random loopback port, assert health status/content type/JSON and unknown-route 404 behavior, and stop the process. They require neither PostgreSQL nor an extra HTTP client library.
 
 After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:8000/health`, and `curl --fail http://127.0.0.1:3000/`; also open the UI in a browser.
 
@@ -107,7 +123,7 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 | Area | Scaffold decision |
 | --- | --- |
 | Backend | Approved uv, Python 3.12, FastAPI, Uvicorn; pytest for tests. `app/main.py` wires the HTTP router. |
-| Boundaries | Domain entities are framework-independent; SQLAlchemy persistence models are separate. The transactional import adapter reuses the SQL models and connection factory; read-only PO queries are next. |
+| Boundaries | Domain entities are framework-independent; SQLAlchemy persistence models are separate. Transactional import and read-only PO query adapters reuse the same SQL models and connection factory. |
 | Frontend | Approved pnpm, Next.js App Router, React, TypeScript; no UI framework or extra client libraries. |
 | Containers | Python 3.12, Node.js 24, PostgreSQL 17, versioned uv image; frozen dependency installs. App containers run as non-root users. |
 | Secrets | PostgreSQL variables are supplied only to database/backend services. No credentials or model/database calls are exposed to the frontend. |
@@ -135,13 +151,19 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 **Storage boundaries:** PostgreSQL `NUMERIC` without a fixed scale preserves Decimal money/quantities, and `DATE` stores dates. Composite foreign keys bind each GRN line to the header's PO and the correct PO-local line. Item codes are not globally unique. Invoice references preserve order and raw nonexistent PO references; duplicate invoice numbers remain representable. No payment policy or supplier-activity restriction is introduced. Invoice children use restrictive foreign keys, not destructive cascades.
 
-**Scope:** This decision established tables and migrations. The importer below reuses them; read-only PO queries are the next step.
+**Scope:** This decision established tables and migrations. The importer and read-only PO query below reuse them.
 
 ### D3 — Atomic, immutable reference-data imports
 
 **Decision:** Read the three challenge JSON arrays through an infrastructure reader, orchestrate identity/content/reference validation in an application use case through a minimal transaction port, and persist using the existing synchronous ORM models and engine factory. The CLI is a separate composition root; API startup is unchanged.
 
 **Rationale/trade-off:** Identical reimports are safe no-ops; conflicting existing content fails instead of silently replacing reference history. The complete reference set is loaded for prospective validation, appropriate for this small challenge dataset rather than large-scale ingestion. PostgreSQL constraints remain the final guard. No new schema, automatic migrations, process-locking framework, invoice import, or business payment policy is introduced.
+
+### D4 — Read-only PO query with exact received totals
+
+**Decision:** Expose a minimal application query port, immutable Decimal/date DTOs, and a use case, wired to a synchronous SQLAlchemy adapter and HTTP response schemas by `main.py`. Aggregate GRN lines by PO and local line before an outer join to ordered lines; bind the incoming PO number as a SQLAlchemy parameter.
+
+**Rationale/trade-off:** Keep the query independent of HTTP and ORM details, preserve zero-receipt lines and exact quantities, and avoid joined-row multiplication. An engine is created lazily for each query and disposed afterward, favoring simple resource ownership over connection-pool reuse for this small read-only milestone. No migrations, imports, schema changes, or payment policy occur on reads.
 
 ## Current limitations
 
