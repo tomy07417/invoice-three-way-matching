@@ -1,6 +1,6 @@
 # Invoice Three-Way Matching
 
-Local monorepo scaffold: Next.js UI, FastAPI API, and PostgreSQL. No invoice business logic is implemented yet. See the [architecture](docs/ARCHITECTURE.md) for the backend dependency boundaries.
+Local monorepo: Next.js UI, FastAPI API, and PostgreSQL. Pure Supplier, PurchaseOrder, PurchaseOrderLine, GoodsReceivedNote, Invoice, and InvoiceLine records are implemented, including nested GRN lines. Domain records use standard-library dataclasses, Decimal, and date; persistence adapters and invoice business rules remain future work. See the [architecture](docs/ARCHITECTURE.md) for the backend dependency boundaries.
 
 ## Quick start with Docker Compose
 
@@ -61,7 +61,7 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 | Area | Scaffold decision |
 | --- | --- |
 | Backend | Approved uv, Python 3.12, FastAPI, Uvicorn; pytest for tests. `app/main.py` wires the HTTP router. |
-| Boundaries | Domain/application remain empty and independent of frameworks. No persistence adapter or database driver is selected. |
+| Boundaries | Domain records are framework-independent. Reference fixtures live in data/reference-data/reference-data; run backend/.venv/bin/python -m pytest backend/tests/test_domain_entities.py -q. Application and persistence remain unimplemented. |
 | Frontend | Approved pnpm, Next.js App Router, React, TypeScript; no UI framework or extra client libraries. |
 | Containers | Python 3.12, Node.js 24, PostgreSQL 17, versioned uv image; frozen dependency installs. App containers run as non-root users. |
 | Secrets | PostgreSQL variables stay in the database service. No credentials or model/database calls are exposed to the frontend. |

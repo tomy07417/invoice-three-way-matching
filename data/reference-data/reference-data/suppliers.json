@@ -1,0 +1,50 @@
+[
+  {
+    "supplier_id": "SUP-001",
+    "legal_name": "Nordic Office Supply AB",
+    "tax_id": "SE556123456701",
+    "default_currency": "USD",
+    "status": "active",
+    "address": "Kungsgatan 12, 111 35 Stockholm, Sweden"
+  },
+  {
+    "supplier_id": "SUP-002",
+    "legal_name": "Bluepeak Cloud Services LLC",
+    "tax_id": "84-2231987",
+    "default_currency": "USD",
+    "status": "active",
+    "address": "2100 Market St, Denver, CO 80205, USA"
+  },
+  {
+    "supplier_id": "SUP-003",
+    "legal_name": "Meridian IT Hardware GmbH",
+    "tax_id": "DE812345678",
+    "default_currency": "USD",
+    "status": "active",
+    "address": "Lindenstrasse 44, 10969 Berlin, Germany"
+  },
+  {
+    "supplier_id": "SUP-004",
+    "legal_name": "Rapid Freight Logistics S.A.",
+    "tax_id": "30-71234567-9",
+    "default_currency": "USD",
+    "status": "active",
+    "address": "Av. Belgrano 1450, C1093 Buenos Aires, Argentina"
+  },
+  {
+    "supplier_id": "SUP-005",
+    "legal_name": "Southwind Catering Ltd",
+    "tax_id": "GB123456789",
+    "default_currency": "USD",
+    "status": "active",
+    "address": "18 Bermondsey Street, London SE1 3TQ, United Kingdom"
+  },
+  {
+    "supplier_id": "SUP-006",
+    "legal_name": "Ardent Training Institute Inc",
+    "tax_id": "47-1122334",
+    "default_currency": "USD",
+    "status": "inactive",
+    "address": "455 Pine Ave, Austin, TX 78701, USA"
+  }
+]

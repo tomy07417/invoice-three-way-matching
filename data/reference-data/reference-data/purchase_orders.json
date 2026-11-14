@@ -1,0 +1,190 @@
+[
+  {
+    "po_number": "PO-2026-0101",
+    "supplier_id": "SUP-001",
+    "po_date": "2026-06-10",
+    "currency": "USD",
+    "status": "open",
+    "lines": [
+      {
+        "line_number": 1,
+        "item_code": "OFF-PAP-A4",
+        "description": "Copy paper A4, 80g, box of 5 reams",
+        "quantity_ordered": 40,
+        "unit_price": 24.5
+      },
+      {
+        "line_number": 2,
+        "item_code": "OFF-TON-BK",
+        "description": "Toner cartridge black, HP 59X compatible",
+        "quantity_ordered": 6,
+        "unit_price": 89.0
+      }
+    ]
+  },
+  {
+    "po_number": "PO-2026-0102",
+    "supplier_id": "SUP-003",
+    "po_date": "2026-06-15",
+    "currency": "USD",
+    "status": "open",
+    "lines": [
+      {
+        "line_number": 1,
+        "item_code": "IT-DOCK-01",
+        "description": "USB-C laptop docking station, dual 4K",
+        "quantity_ordered": 15,
+        "unit_price": 185.0
+      },
+      {
+        "line_number": 2,
+        "item_code": "IT-CBL-USBC",
+        "description": "USB-C to USB-C cable, 2 m",
+        "quantity_ordered": 30,
+        "unit_price": 12.0
+      }
+    ]
+  },
+  {
+    "po_number": "PO-2026-0103",
+    "supplier_id": "SUP-005",
+    "po_date": "2026-07-01",
+    "currency": "USD",
+    "status": "open",
+    "lines": [
+      {
+        "line_number": 1,
+        "item_code": "EVT-LUNCH",
+        "description": "Team lunch catering, per person",
+        "quantity_ordered": 45,
+        "unit_price": 18.0
+      }
+    ]
+  },
+  {
+    "po_number": "PO-2026-0104",
+    "supplier_id": "SUP-002",
+    "po_date": "2026-07-08",
+    "currency": "USD",
+    "status": "open",
+    "lines": [
+      {
+        "line_number": 1,
+        "item_code": "CLD-CPU-HR",
+        "description": "Cloud compute, vCPU hour",
+        "quantity_ordered": 500,
+        "unit_price": 0.4
+      },
+      {
+        "line_number": 2,
+        "item_code": "CLD-STO-TB",
+        "description": "Object storage, TB-month",
+        "quantity_ordered": 20,
+        "unit_price": 21.0
+      }
+    ]
+  },
+  {
+    "po_number": "PO-2026-0105",
+    "supplier_id": "SUP-001",
+    "po_date": "2026-07-14",
+    "currency": "USD",
+    "status": "open",
+    "lines": [
+      {
+        "line_number": 1,
+        "item_code": "FUR-CHAIR-E",
+        "description": "Ergonomic office chair, mesh back",
+        "quantity_ordered": 12,
+        "unit_price": 210.0
+      }
+    ]
+  },
+  {
+    "po_number": "PO-2026-0106",
+    "supplier_id": "SUP-003",
+    "po_date": "2026-07-20",
+    "currency": "USD",
+    "status": "open",
+    "lines": [
+      {
+        "line_number": 1,
+        "item_code": "IT-MON-27",
+        "description": "Monitor 27 inch, 1440p, IPS",
+        "quantity_ordered": 25,
+        "unit_price": 240.0
+      },
+      {
+        "line_number": 2,
+        "item_code": "IT-CBL-HDMI",
+        "description": "HDMI 2.1 cable, 2 m",
+        "quantity_ordered": 25,
+        "unit_price": 9.0
+      }
+    ]
+  },
+  {
+    "po_number": "PO-2026-0107",
+    "supplier_id": "SUP-004",
+    "po_date": "2026-07-25",
+    "currency": "USD",
+    "status": "open",
+    "lines": [
+      {
+        "line_number": 1,
+        "item_code": "LOG-PAL-DOM",
+        "description": "Pallet shipment, domestic, per pallet",
+        "quantity_ordered": 10,
+        "unit_price": 150.0
+      }
+    ]
+  },
+  {
+    "po_number": "PO-2026-0108",
+    "supplier_id": "SUP-005",
+    "po_date": "2026-08-03",
+    "currency": "USD",
+    "status": "open",
+    "lines": [
+      {
+        "line_number": 1,
+        "item_code": "PAN-COFFEE",
+        "description": "Pantry coffee supplies, weekly pack",
+        "quantity_ordered": 24,
+        "unit_price": 32.0
+      }
+    ]
+  },
+  {
+    "po_number": "PO-2026-0109",
+    "supplier_id": "SUP-002",
+    "po_date": "2026-08-05",
+    "currency": "USD",
+    "status": "open",
+    "lines": [
+      {
+        "line_number": 1,
+        "item_code": "CLD-CPU-HR",
+        "description": "Cloud compute, vCPU hour",
+        "quantity_ordered": 800,
+        "unit_price": 0.4
+      }
+    ]
+  },
+  {
+    "po_number": "PO-2026-0119",
+    "supplier_id": "SUP-002",
+    "po_date": "2026-08-12",
+    "currency": "USD",
+    "status": "open",
+    "lines": [
+      {
+        "line_number": 1,
+        "item_code": "CLD-STO-TB",
+        "description": "Object storage, TB-month",
+        "quantity_ordered": 40,
+        "unit_price": 21.0
+      }
+    ]
+  }
+]
