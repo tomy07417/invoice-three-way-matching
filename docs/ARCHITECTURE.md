@@ -51,12 +51,14 @@ invoice-three-way-matching/
 │   │   │   ├── dtos/         # use-case inputs and outputs
 │   │   │   └── ports/        # contracts for external services
 │   │   ├── infrastructure/
-│   │   │   ├── persistence/  # PostgreSQL adapters, models, and migrations
+│   │   │   ├── persistence/  # PostgreSQL adapters and SQLAlchemy models
 │   │   │   ├── extraction/   # Azure OpenAI adapter and document preparation
 │   │   │   └── storage/      # document storage adapters
 │   │   └── interfaces/
 │   │       ├── api/          # FastAPI REST endpoints and input/output schemas
 │   │       └── cli/          # reference-data import command
+│   ├── migrations/           # explicit Alembic schema revisions
+│   ├── alembic.ini
 │   ├── tests/
 │   └── Dockerfile
 ├── docs/
@@ -64,7 +66,7 @@ invoice-three-way-matching/
 │   └── ARCHITECTURE.md
 └── data/                     # local samples, if permitted; never secrets
 ```
-The four backend components and dependency direction are agreed; the detailed directory layout is illustrative and can grow incrementally. Confirm major changes with the project owner. Specific persistence, authentication, validation, and HTTP client libraries are deliberately undecided.
+The four backend components and dependency direction are agreed; the detailed directory layout is illustrative and can grow incrementally. Confirm major changes with the project owner. Persistence uses approved SQLAlchemy 2 models, Alembic migrations, and synchronous Psycopg 3; uv manages Python dependencies. SQL models remain separate from domain entities. Authentication, validation, and HTTP client library choices remain open.
 
 ## Responsibility boundaries
 - Frontend: invoice upload, status, review queue, corrections, configuration UI, and audit views according to role.
@@ -76,8 +78,8 @@ The four backend components and dependency direction are agreed; the detailed di
 ## First implementation milestone
 1. Scaffold repository and Docker Compose for frontend, backend, database.
 2. Confirm database and API startup, plus a health endpoint.
-3. Agree on persistence/ORM and migration library before adding dependencies.
-4. Define supplier, PO, PO line, GRN, and GRN line tables.
+3. Use approved SQLAlchemy 2, Alembic, and synchronous Psycopg 3 with uv.
+4. Define supplier, PO, PO line, GRN, GRN line, and raw invoice tables (implemented). Run migrations explicitly; API startup never migrates or connects to PostgreSQL.
 5. Build repeatable import command for the three provided JSON files.
 6. Add read-only API to inspect a PO with lines and aggregated GRN quantities.
 7. Write tests for import and GRN aggregation.
@@ -85,7 +87,6 @@ The four backend components and dependency direction are agreed; the detailed di
 **Acceptance:** a reviewer can start the local stack, import reference data using a documented command, and query a PO. No LLM integration is required in this first milestone.
 
 ## Decisions to confirm later
-- ORM/migrations and Python dependency manager
 - Authentication implementation and session approach
 - Document file storage strategy
 - Extraction SDK/HTTP client, retries and validation approach

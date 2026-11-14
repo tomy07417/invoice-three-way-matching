@@ -1,6 +1,6 @@
 # Invoice Three-Way Matching
 
-Local monorepo: Next.js UI, FastAPI API, and PostgreSQL. Pure Supplier, PurchaseOrder, PurchaseOrderLine, GoodsReceivedNote, Invoice, and InvoiceLine records are implemented, including nested GRN lines. Domain records use standard-library dataclasses, Decimal, and date; persistence adapters and invoice business rules remain future work. See the [architecture](docs/ARCHITECTURE.md) for the backend dependency boundaries.
+Local monorepo: Next.js UI, FastAPI API, PostgreSQL, and explicit schema migrations. Domain entities and persistence tables are implemented; reference imports, PO queries, and invoice business logic remain future work. See the [architecture](docs/ARCHITECTURE.md) for the backend dependency boundaries.
 
 ## Quick start with Docker Compose
 
@@ -41,6 +41,24 @@ npm exec --cache .cache/npm --yes --package=pnpm@10.28.2 -- pnpm dev
 
 PostgreSQL is not needed for API liveness or the placeholder UI. To run the database alone, use `docker compose --env-file .env up -d database`.
 
+## Database migrations
+
+Run migrations explicitly against the intended database; API startup never runs them. Local commands require server-side environment variables already exported (no automatic `.env` reading): `DATABASE_URL` takes precedence, otherwise supply `POSTGRES_HOST`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and optionally `POSTGRES_PORT` (default `5432`). URL passwords must be URL-encoded; component passwords are passed unchanged. Never put credentials in command output or frontend configuration.
+
+From the repository root:
+
+```sh
+uv run --project backend alembic -c backend/alembic.ini upgrade head
+```
+
+For a built Compose backend image, with Compose environment configured:
+
+```sh
+docker compose run --rm backend alembic upgrade head
+```
+
+Repeating `upgrade head` is safe. Rollback is explicit (`alembic downgrade base`, using the same config/location) and **drops these tables and their stored data**; it is not a troubleshooting step for a persistent development volume. Review backups and target before any downgrade.
+
 ## Verification
 
 From the repository root after dependency installation:
@@ -52,6 +70,9 @@ npm exec --cache .cache/npm --yes --package=pnpm@10.28.2 -- pnpm build
 docker compose --env-file .env.example config --quiet
 ```
 
+Run the full backend suite with `backend/.venv/bin/python -m pytest backend/tests -q`.
+Persistence integration tests skip unless `TEST_DATABASE_URL` points to an explicitly isolated PostgreSQL service and a database named with a `test_` prefix. The test user must be able to create databases. Each test creates its own unique `test_` database, runs the public Alembic CLI, and drops only that database on teardown. Never point this at the live Compose service or persistent volume; SQLite is not a substitute. Run `backend/.venv/bin/python -m pytest backend/tests/test_persistence.py -q` after exporting the isolated URL. Without it, only configuration/model checks run, not database integration.
+
 The backend tests start a bounded, temporary Uvicorn subprocess on a random loopback port, assert health status/content type/JSON and unknown-route 404 behavior, and stop the process. They require neither PostgreSQL nor an extra HTTP client library.
 
 After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:8000/health`, and `curl --fail http://127.0.0.1:3000/`; also open the UI in a browser.
@@ -61,10 +82,10 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 | Area | Scaffold decision |
 | --- | --- |
 | Backend | Approved uv, Python 3.12, FastAPI, Uvicorn; pytest for tests. `app/main.py` wires the HTTP router. |
-| Boundaries | Domain records are framework-independent. Reference fixtures live in data/reference-data/reference-data; run backend/.venv/bin/python -m pytest backend/tests/test_domain_entities.py -q. Application and persistence remain unimplemented. |
+| Boundaries | Domain entities are framework-independent; SQLAlchemy persistence models are separate. A lazy synchronous connection factory supports the persistence models; import and query adapters are next steps. |
 | Frontend | Approved pnpm, Next.js App Router, React, TypeScript; no UI framework or extra client libraries. |
 | Containers | Python 3.12, Node.js 24, PostgreSQL 17, versioned uv image; frozen dependency installs. App containers run as non-root users. |
-| Secrets | PostgreSQL variables stay in the database service. No credentials or model/database calls are exposed to the frontend. |
+| Secrets | PostgreSQL variables are supplied only to database/backend services. No credentials or model/database calls are exposed to the frontend. |
 | Health | API liveness only; database readiness is a separate Compose check. |
 
 ## Decision log
@@ -79,8 +100,18 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 **Trade-off:** Explicit boundaries introduce additional interfaces, data conversions, and indirection compared with a conventional layered implementation. For a small application, that can increase navigation and implementation effort without an immediate payoff.
 
-**Scope and guardrail:** Retain a single monolith and introduce ports only at real integration boundaries. Do not create an interface for every class or add abstractions for hypothetical future replacements. The goal is isolated, testable business rules, not maximum abstraction. This scaffold establishes the directory boundaries; business rules and integration adapters are not implemented yet.
+**Scope and guardrail:** Retain a single monolith and introduce ports only at real integration boundaries. Do not create an interface for every class or add abstractions for hypothetical future replacements. The goal is isolated, testable business rules, not maximum abstraction. The directory boundaries now contain domain entities and persistence adapters; deterministic matching and payment rules remain future work.
+
+### D2 — Synchronous SQLAlchemy persistence and explicit Alembic migrations
+
+**Decision:** Use approved SQLAlchemy 2, Alembic, and Psycopg 3 with synchronous database access, managed by uv. SQL models remain independent of the domain. Versioned migrations live in `backend/migrations`; use the explicit commands above, never startup migrations.
+
+**Rationale/trade-off:** Conventional ORM models and migrations keep constraints reviewable without a custom SQL framework. Synchronous access is sufficient for this monolith; it does not provide asynchronous database concurrency.
+
+**Storage boundaries:** PostgreSQL `NUMERIC` without a fixed scale preserves Decimal money/quantities, and `DATE` stores dates. Composite foreign keys bind each GRN line to the header's PO and the correct PO-local line. Item codes are not globally unique. Invoice references preserve order and raw nonexistent PO references; duplicate invoice numbers remain representable. No payment policy or supplier-activity restriction is introduced. Invoice children use restrictive foreign keys, not destructive cascades.
+
+**Scope:** This decision established tables and migrations. Import and query adapters are the next implementation steps.
 
 ## Current limitations
 
-This is local development infrastructure, not a production deployment: authentication, authorization, database integration/migrations, Azure OpenAI, uploads, matching, and audit workflows are intentionally absent. Container images favor a simple reproducible scaffold over optimized size; frontend build dependencies remain in the image. No open business-policy questions are resolved by this scaffold.
+This is local development infrastructure, not a production deployment: authentication, authorization, Azure OpenAI, uploads, matching, and audit workflows are intentionally absent. Container images favor a simple reproducible scaffold over optimized size; frontend build dependencies remain in the image. No open business-policy questions are resolved by this scaffold.
