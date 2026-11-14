@@ -1,6 +1,49 @@
 # Invoice Three-Way Matching
 
-Local monorepo: Next.js UI, FastAPI API, PostgreSQL, and explicit schema migrations. Domain entities, persistence tables, the reference-data import CLI, and read-only PO queries are implemented; invoice business logic is not implemented yet. See the [architecture](docs/ARCHITECTURE.md) for the backend dependency boundaries.
+A supplier-invoice validation system for the Machines Like Me technical challenge. Three-Way Matching compares what a supplier invoices with what was ordered and what was actually received, so discrepancies can be explained before a payment decision. This repository is an incremental implementation, not yet an end-to-end invoice-processing application.
+
+## How the system works
+
+The three documents serve different purposes:
+
+| Document | What it establishes |
+| --- | --- |
+| Invoice | What the supplier is billing: quantities, unit prices, and purchase-order references. |
+| Purchase Order (PO) | What was ordered, from which supplier, and at what agreed price. |
+| Goods Received Note (GRN) | What was received; several GRNs can contribute to the received quantity of one PO line. |
+
+The intended workflow is to upload an invoice, extract structured fields with Azure OpenAI, retrieve the relevant reference data, and run deterministic Python checks. **The model extracts data; it does not decide payment outcomes.** Extraction, upload, and this application-level orchestration are not implemented yet.
+
+The matching engine evaluates resolved input data with this precedence:
+
+1. **Rejected:** a rejection rule is triggered, such as a missing/nonexistent PO, supplier mismatch, or an invoice dated before its PO.
+2. **Held for Review:** no rejection takes precedence, but a discrepancy is found, such as excess invoiced quantity, a unit price outside tolerance, or a confirmed unmatched line.
+3. **Auto-Pay:** every mandatory check is complete and none finds a discrepancy. This is an evaluation status, not execution of a payment.
+
+Price tolerance defaults to **2% per line**, using exact Decimal arithmetic. The engine currently exposes a provisional outcome separately from its final outcome: unresolved policies remain explicit, available checks still run, and **any pending mandatory check prevents a final status**. See [the engine contract and runnable example](#in-memory-matching-no-database-or-model).
+
+## What works today
+
+| Capability | Current state |
+| --- | --- |
+| Local stack | Next.js placeholder UI, FastAPI backend, PostgreSQL, and Docker Compose. |
+| Reference data | Domain entities, explicit migrations, and an atomic, repeatable JSON importer for suppliers, POs, and GRNs. |
+| PO inspection | Read-only HTTP endpoint with PO lines and received quantities aggregated across GRNs. |
+| Matching | Pure in-memory engine with rejection/hold rules, configurable inputs, structured reasons, and explicit pending checks; not connected to an API or the UI. |
+| Invoice workflow | Upload, Azure OpenAI extraction, evaluation orchestration, human review, and audit history are not implemented. |
+
+Duplicate criteria, partial/prior invoicing, currency/tax treatment, ambiguous line allocation, supplier/PO status policies, and reevaluation still require clarification or integration. The engine does not invent answers to these questions.
+
+## Architecture at a glance
+
+The backend is a **single hexagonal monolith**, not a set of microservices:
+
+- **Domain** (`backend/app/domain/`): framework-independent entities and `matching/`, which receives resolved facts and evaluates rules without I/O.
+- **Application** (`backend/app/application/`): use cases and ports for orchestration. Reference-data import and PO queries exist; invoice evaluation orchestration does not.
+- **Infrastructure** (`backend/app/infrastructure/`): concrete adapters, including PostgreSQL persistence and JSON reference-data reading.
+- **Interfaces** (`backend/app/interfaces/`): HTTP routes and the import CLI. `main.py` wires the backend components together.
+
+The Next.js frontend communicates with the FastAPI backend over HTTP; it never accesses the database or an extraction model directly. PostgreSQL stores reference data; invoice tables exist, but invoice-processing and decision persistence workflows are not wired up. See [Architecture](docs/ARCHITECTURE.md) for dependency rules and the proposed extension points.
 
 ## Quick start with Docker Compose
 
@@ -95,6 +138,57 @@ Received quantity is the sum across all GRNs for that PO and its local line numb
 
 Unknown POs return HTTP 404 with `{"detail":"Purchase order not found"}`. Missing/invalid database configuration or database read failures return HTTP 503 with `{"detail":"Database unavailable"}`, without connection/SQL details. Database configuration and connections are lazy at query time: `/health` and unknown routes remain available without a configured database. API startup and reads never migrate, import, or write reference data. Interactive response schemas are available at `/docs`.
 
+## In-memory matching (no database or model)
+
+The partial engine implements the unequivocal rejection/hold rules from the owner's supplied challenge sections 7/7.1. It does **not** resolve all challenge policies or expose a matching API. Run this example from the repository root after installing backend dependencies:
+
+```sh
+PYTHONPATH=backend backend/.venv/bin/python - <<'PY'
+from datetime import date
+from decimal import Decimal as D
+from app.domain.entities import (
+    Invoice, InvoiceLine, PurchaseOrder, PurchaseOrderLine,
+    GoodsReceivedNote, GoodsReceivedNoteLine,
+)
+from app.domain.matching.types import LineAssociation, PolicyFacts
+from app.domain.matching.engine import evaluate
+
+po = PurchaseOrder("EXAMPLE-PO", "SUP-X", date(2026, 6, 1), "EUR", "open",
+                   (PurchaseOrderLine(7, "PART-X", "A fitting", D("5"), D("100")),))
+invoice = Invoice("Example supplier", "RAW-TAX", "NEW-739", date(2026, 6, 2),
+                  None, (po.po_number,), "EUR", D("515"), D("0"), D("515"),
+                  (InvoiceLine("Extracted fitting", D("5"), D("103"), D("515"), "raw / 7"),))
+grn = GoodsReceivedNote("EXAMPLE-GRN", po.po_number, date(2026, 6, 2),
+                        (GoodsReceivedNoteLine(7, D("5")),))
+result = evaluate(
+    invoice, (po,), (grn,), resolved_supplier_id="SUP-X",
+    associations={0: LineAssociation(po.po_number, 7)},
+    # Illustrative verified facts for this example, not inferred by the engine:
+    policies=PolicyFacts(quantities_comparable=True, unit_prices_comparable=True),
+)
+print(result.provisional_status, result.final_status, result.complete)
+print([rule.code for rule in result.pending])
+PY
+```
+
+Expected output:
+
+```text
+Held for Review None False
+['DUPLICATE', 'SUPPLIER_ACTIVITY', 'PO_STATUS']
+```
+
+### Result and caller contract
+
+- `evaluate` returns a frozen `EvaluationResult`: `provisional_status`, `final_status`, tuple `rules`, the immutable `config` snapshot, plus `pending` and `complete` properties. Each `RuleResult` has a stable code, `PASS`/`REJECT`/`HOLD`/`PENDING`, explanatory reason, and optional PO number, zero-based invoice line index and PO-local line number.
+- The engine alone applies `Rejected > Held for Review > Auto-Pay`. Available checks always run; pending checks are not passes. Provisional `Auto-Pay` means only **no discrepancy in available checks**, never permission to pay. Any mandatory pending check makes `complete=False` and `final_status=None`, even with provisional rejection/hold. Only a complete evaluation yields exactly one final business status.
+- The caller must resolve supplier identity explicitly: supplier name/tax ID are not normalized or guessed. Association mappings use zero-based invoice indices: omitted key means unresolved; `None` means confirmed no match (hold); `LineAssociation` means verified whole-line PO/local-line association. Raw text, descriptions and item codes are never parsed or fuzzy-matched. Invalid association targets remain pending; duplicate context identities/out-of-range indices raise `ValueError`.
+- Quantities sum supplied GRNs by PO plus local line with exact Decimal arithmetic. Multiple invoice lines sharing a PO line remain pending rather than reusing receipts. `quantities_comparable=True` must represent verified applicability of this receipt-total comparison, including partial/prior-invoice considerations; no prior quantities are subtracted. `unit_prices_comparable=True` must establish comparable tax basis. Currency mismatch and nonpositive reference prices still remain pending; no conversion, tax or credit policy is invented.
+- `PolicyFacts` defaults are unresolved. `duplicate=True/False` is an explicitly verified duplicate/nonduplicate fact, **not a duplicate detection algorithm**; absent evidence calls the named pending stub. `supplier_activity_cleared` and `po_status_cleared` mean externally verified applicable policy clearance, not assumptions that active/open always pass. Supplying every relevant verified fact permits completed evaluations; these inputs must not be used as a blanket bypass in a future integration. Unresolved status-policy failures cannot yet be classified by this partial engine.
+- `MatchingConfig` defaults to fractional `Decimal('0.02')` price tolerance and `Decimal('5000')` analyst approval limit; both must be finite nonnegative Decimals. Exact ±2% passes, strictly greater differences hold. No arbitrary upper tolerance bound is imposed. The analyst limit is carried only, not enforced as a payment rule.
+
+Focused checks: `backend/.venv/bin/python -m pytest backend/tests/test_matching_rules.py backend/tests/test_matching_engine.py -q`.
+
 ## Verification
 
 From the repository root after dependency installation:
@@ -141,7 +235,7 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 **Trade-off:** Explicit boundaries introduce additional interfaces, data conversions, and indirection compared with a conventional layered implementation. For a small application, that can increase navigation and implementation effort without an immediate payoff.
 
-**Scope and guardrail:** Retain a single monolith and introduce ports only at real integration boundaries. Do not create an interface for every class or add abstractions for hypothetical future replacements. The goal is isolated, testable business rules, not maximum abstraction. The directory boundaries now contain domain entities and persistence adapters; deterministic matching and payment rules remain future work.
+**Scope and guardrail:** Retain a single monolith and introduce ports only at real integration boundaries. Do not create an interface for every class or add abstractions for hypothetical future replacements. The goal is isolated, testable business rules, not maximum abstraction. The directory boundaries now contain domain entities and persistence adapters; the partial deterministic matching engine now lives in Domain; extraction, integration and human-review workflows remain future work.
 
 ### D2 — Synchronous SQLAlchemy persistence and explicit Alembic migrations
 
@@ -165,6 +259,18 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 **Rationale/trade-off:** Keep the query independent of HTTP and ORM details, preserve zero-receipt lines and exact quantities, and avoid joined-row multiplication. An engine is created lazily for each query and disposed afterward, favoring simple resource ownership over connection-pool reuse for this small read-only milestone. No migrations, imports, schema changes, or payment policy occur on reads.
 
+### D5 — Partial deterministic matching with explicit completeness
+
+**Decision:** Reuse frozen domain entities, pure rejection/quantity/price checks, and one precedence engine. Implement the owner's supplied sections 7/7.1, with S6's correction: unresolved policies do not suppress available checks. Return provisional implemented-check status separately from final status/completeness. This is a partial implementation, not completion of all challenge business policies; the original PDF itself was not inspected for this work.
+
+**Trade-off and pending decisions:** Caller-verified supplier identity, associations and named policy facts keep ambiguous business decisions outside this engine without a generic policy framework. Duplicate criteria, partial invoicing, currency/tax treatment, inactive suppliers, closed POs and split/multi-PO allocation remain pending where evidence is absent. Repeated targets cannot reuse receipts. Changing an immutable configuration snapshot affects only the evaluation receiving it; existing results remain unchanged. Automatic reevaluation after parameter changes, corrections or later GRNs remains pending, as do manager configuration storage/endpoints, authorization, human overrides and audit history. No claim of their implementation is made here.
+
+### D6 — Group matching by business capability
+
+**Decision:** Keep the engine, rules, types, and pending-policy hooks together in `domain/matching/`. This is an organizational refactor of domain services, not a new layer or a change to any rule, result contract, configurable parameter, precedence, or pending-policy behavior.
+
+**Rationale and boundary:** A capability-specific module makes the core business responsibility easier to find than a generic `services/` directory. The engine still receives resolved data and performs no I/O. Future application use cases may retrieve data through ports, invoke the engine, and persist results; no `evaluate_invoice.py` use case, repository integration, compatibility wrappers, or new abstractions are introduced here.
+
 ## Current limitations
 
-This is local development infrastructure, not a production deployment: authentication, authorization, Azure OpenAI, uploads, matching, and audit workflows are intentionally absent. Container images favor a simple reproducible scaffold over optimized size; frontend build dependencies remain in the image. No open business-policy questions are resolved by this scaffold.
+This is local development infrastructure, not a production deployment: authentication, authorization, Azure OpenAI, uploads, matching API integration, and audit workflows are intentionally absent. Container images favor a simple reproducible scaffold over optimized size; frontend build dependencies remain in the image. No open business-policy questions are resolved by this scaffold.

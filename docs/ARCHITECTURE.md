@@ -45,7 +45,11 @@ invoice-three-way-matching/
 │   │   ├── main.py           # composition root and FastAPI startup
 │   │   ├── domain/
 │   │   │   ├── entities/     # business entities, independent of persistence
-│   │   │   └── services/     # pure matching, rules, and domain policies
+│   │   │   └── matching/     # pure matching business capability
+│   │   │       ├── engine.py # evaluation and precedence
+│   │   │       ├── rules.py  # independent deterministic checks
+│   │   │       ├── types.py  # result, configuration, and input contracts
+│   │   │       └── pending_policies.py
 │   │   ├── application/
 │   │   │   ├── use_cases/    # extraction, matching, review, audit, and imports
 │   │   │   ├── dtos/         # use-case inputs and outputs
@@ -85,6 +89,14 @@ The four backend components and dependency direction are agreed; the detailed di
 7. Write tests for import and GRN aggregation.
 
 **Acceptance:** a reviewer can start the local stack, import reference data using a documented command, and query a PO. No LLM integration is required in this first milestone.
+
+## Implemented domain matching slice
+
+`domain/matching/types.py` contains immutable result/configuration and explicit caller-fact contracts; `rules.py` contains pure checks; `pending_policies.py` names unresolved checks; `engine.py` centrally applies `Rejected > Held for Review > Auto-Pay`. Existing frozen Invoice/PO/GRN records are reused unchanged. The engine imports only domain modules and the standard library and has no API/application/persistence integration. Grouping it by business capability improves cohesion without adding a layer or changing behavior. Application use cases will orchestrate retrieval through ports, engine invocation, and persistence; that orchestration is not part of the engine, and no `evaluate_invoice.py` use case is implemented yet.
+
+Evaluation returns implemented-check `provisional_status` separately from `complete`, `pending` and `final_status`. Pending policies never suppress available checks and never count as passed: any pending result makes the final status `None`. Caller-verified supplier identity, PO-local whole-line associations and minimal policy facts establish comparison evidence without implementing duplicate criteria, identity normalization, fuzzy matching, prior-invoice subtraction, tax calculation or currency conversion. Repeated invoice targets need an allocation policy and remain incomplete. See the [README in-memory example](../README.md#in-memory-matching-no-database-or-model) for the public contract and limitations.
+
+Configuration is an immutable evaluation input (Decimal fractional tolerance 0.02; analyst limit 5000 carried for future review). New snapshots affect only evaluations receiving them; existing immutable results do not change. Parameter management/audit, human decisions and reevaluation after corrections or later GRNs remain future work. This slice implements only unequivocal policies from the owner's supplied sections 7/7.1, not all challenge policies.
 
 ## Decisions to confirm later
 - Authentication implementation and session approach
