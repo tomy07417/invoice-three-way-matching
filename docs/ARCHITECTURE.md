@@ -49,7 +49,7 @@ invoice-three-way-matching/
 │   │   │       ├── engine.py # evaluation and precedence
 │   │   │       ├── rules.py  # independent deterministic checks
 │   │   │       ├── types.py  # result, configuration, and input contracts
-│   │   │       └── pending_policies.py
+│   │   │       └── duplicates.py # explicit normalization and history checks
 │   │   ├── application/
 │   │   │   ├── use_cases/    # extraction, matching, review, audit, and imports
 │   │   │   ├── dtos/         # use-case inputs and outputs
@@ -92,15 +92,23 @@ The four backend components and dependency direction are agreed; the detailed di
 
 ## Implemented domain matching slice
 
-`domain/matching/types.py` contains immutable result/configuration and explicit caller-fact contracts; `rules.py` contains pure checks; `pending_policies.py` names unresolved checks; `engine.py` centrally applies `Rejected > Held for Review > Auto-Pay`. Existing frozen Invoice/PO/GRN records are reused unchanged. The engine imports only domain modules and the standard library and has no API/application/persistence integration. Grouping it by business capability improves cohesion without adding a layer or changing behavior. Application use cases will orchestrate retrieval through ports, engine invocation, and persistence; that orchestration is not part of the engine, and no `evaluate_invoice.py` use case is implemented yet.
+`domain/matching/types.py` contains immutable result/configuration and invoice-history contracts; `rules.py` contains pure checks; `duplicates.py` implements explicit invoice-number normalization and history comparisons; `engine.py` centrally applies `Rejected > Held for Review > Auto-Pay`. Existing frozen Invoice/PO/GRN records are reused unchanged. The engine imports only domain modules and the standard library and has no API/application/persistence integration. Grouping it by business capability improves cohesion without adding a layer or changing behavior. Application use cases will orchestrate retrieval through ports, engine invocation, and persistence; that orchestration is not part of the engine, and no `evaluate_invoice.py` use case is implemented yet.
 
-Evaluation returns implemented-check `provisional_status` separately from `complete`, `pending` and `final_status`. Pending policies never suppress available checks and never count as passed: any pending result makes the final status `None`. Caller-verified supplier identity, PO-local whole-line associations and minimal policy facts establish comparison evidence without implementing duplicate criteria, identity normalization, fuzzy matching, prior-invoice subtraction, tax calculation or currency conversion. Repeated invoice targets need an allocation policy and remain incomplete. See the [README in-memory example](../README.md#in-memory-matching-no-database-or-model) for the public contract and limitations.
+Evaluation returns implemented-check `provisional_status` separately from `complete`, `pending` and `final_status`. Pending policies never suppress available checks and never count as passed: any pending result makes the final status `None`. Caller-supplied Supplier, PO-local whole-line associations, other-case InvoiceHistoryEntry records, prior approved quantities and net unit prices establish comparison evidence. Explicit number normalization and confirmed duplicate/similarity criteria are implemented. Invoice quantities sharing one target are grouped and compared against received minus approved quantities; missing snapshots remain incomplete. Unreliable associations, inactive suppliers, closed POs and currency mismatch hold rather than inventing conversions or arbitrary allocations. Supplier identity resolution, fuzzy matching and tax computation are not implemented. See the [README in-memory example](../README.md#in-memory-matching-no-database-or-model) for the public contract and limitations.
 
-Configuration is an immutable evaluation input (Decimal fractional tolerance 0.02; analyst limit 5000 carried for future review). New snapshots affect only evaluations receiving them; existing immutable results do not change. Parameter management/audit, human decisions and reevaluation after corrections or later GRNs remain future work. This slice implements only unequivocal policies from the owner's supplied sections 7/7.1, not all challenge policies.
+Configuration is an immutable evaluation input (Decimal fractional tolerance 0.02; analyst limit 5000 carried for future review). New snapshots affect only evaluations receiving them; existing immutable results do not change. Parameter management/audit, human decisions and reevaluation after corrections or later GRNs remain future work. This slice implements the confirmed pure policies from the supplied challenge and official client answers, not persisted payment/review/audit workflows.
+
+## Confirmed-policy implementation boundary
+
+The nine official client clarifications are recorded in the PRD. Domain evaluation consumes resolved supplier and PO snapshots, actually received GRNs, quantities already approved for payment, comparable net unit prices, and invoice-history evidence. These inputs are not queries: Application must obtain them through ports in a later integration stage. An authoritative empty history/approved-quantity snapshot differs from missing evidence.
+
+Automatic evaluation, operational invoice state, human decisions and audit are separate concerns. Corrections create new evaluated versions and invalidate prior human decisions without deleting them; pending credit-note requests block payment without rewriting an automatic result. Those workflows require persistence, authorization and audit and are not part of this pure-rule stage. Approval transactions must revalidate availability atomically to prevent concurrent overapproval; the engine does not implement locks or ledger writes.
+
+New GRNs are included whenever explicitly reevaluating with a new received snapshot, even when later-dated than the invoice. The accepted design uses manual audited GRN reevaluation and future-only parameter snapshots. See README decisions D7-D13 for the distinction between official requirements and design choices.
 
 ## Decisions to confirm later
 - Authentication implementation and session approach
 - Document file storage strategy
 - Extraction SDK/HTTP client, retries and validation approach
 - Cloud deployment design
-- Business ambiguities: partial invoicing, duplicates, currency, post-decision correction, inactive suppliers, closed POs, multi-PO mapping, credit notes, later GRNs
+- Remaining business boundaries: nonpositive PO-price percentage basis, negative/credit-line arithmetic, and approval-limit currency/escalation details; the former nine questions now have official answers.

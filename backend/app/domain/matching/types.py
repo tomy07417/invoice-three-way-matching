@@ -43,29 +43,6 @@ class InvoiceHistoryEntry:
 
 
 @dataclass(frozen=True)
-class PolicyFacts:
-    """Verified facts for this invoice snapshot, not switches to omit checks.
-
-    Clearance means an applicable externally established policy was evaluated.
-    False clearance leaves the check pending; it does not invent a discrepancy.
-    No duplicate criteria or policy resolution algorithm is implemented here.
-    """
-    duplicate: bool | None = None
-    quantities_comparable: bool = False
-    unit_prices_comparable: bool = False
-    supplier_activity_cleared: bool = False
-    po_status_cleared: bool = False
-
-    def __post_init__(self) -> None:
-        if self.duplicate is not None and type(self.duplicate) is not bool:
-            raise ValueError("Duplicate fact must be bool or None")
-        for value in (self.quantities_comparable, self.unit_prices_comparable,
-                      self.supplier_activity_cleared, self.po_status_cleared):
-            if type(value) is not bool:
-                raise ValueError("Policy clearance facts must be bool")
-
-
-@dataclass(frozen=True)
 class RuleResult:
     code: str
     outcome: RuleOutcome

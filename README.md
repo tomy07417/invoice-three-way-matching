@@ -20,7 +20,7 @@ The matching engine evaluates resolved input data with this precedence:
 2. **Held for Review:** no rejection takes precedence, but a discrepancy is found, such as excess invoiced quantity, a unit price outside tolerance, or a confirmed unmatched line.
 3. **Auto-Pay:** every mandatory check is complete and none finds a discrepancy. This is an evaluation status, not execution of a payment.
 
-Price tolerance defaults to **2% per line**, using exact Decimal arithmetic. The engine currently exposes a provisional outcome separately from its final outcome: unresolved policies remain explicit, available checks still run, and **any pending mandatory check prevents a final status**. See [the engine contract and runnable example](#in-memory-matching-no-database-or-model).
+Price tolerance defaults to **2% per line**, using exact Decimal arithmetic. The engine exposes a provisional outcome separately from its final outcome: missing mandatory evidence or unsupported comparison bases remain explicit, available checks still run, and **any pending mandatory check prevents a final status**. See [the engine contract and runnable example](#in-memory-matching-no-database-or-model).
 
 ## What works today
 
@@ -29,10 +29,10 @@ Price tolerance defaults to **2% per line**, using exact Decimal arithmetic. The
 | Local stack | Next.js placeholder UI, FastAPI backend, PostgreSQL, and Docker Compose. |
 | Reference data | Domain entities, explicit migrations, and an atomic, repeatable JSON importer for suppliers, POs, and GRNs. |
 | PO inspection | Read-only HTTP endpoint with PO lines and received quantities aggregated across GRNs. |
-| Matching | Pure in-memory engine with rejection/hold rules, configurable inputs, structured reasons, and explicit pending checks; not connected to an API or the UI. |
+| Matching | Pure in-memory engine for confirmed matching policies, explicit historical/approval inputs, structured reasons and missing-evidence reporting; not connected to an API or the UI. |
 | Invoice workflow | Upload, Azure OpenAI extraction, evaluation orchestration, human review, and audit history are not implemented. |
 
-Duplicate criteria, partial/prior invoicing, currency/tax treatment, ambiguous line allocation, supplier/PO status policies, and reevaluation still require clarification or integration. The engine does not invent answers to these questions.
+The client has clarified the nine previously open business questions; [the PRD](docs/PRD.md#official-client-clarifications) records those requirements separately from the accepted design policies below. The clarified pure rules are implemented independently of operational integration. Approval transactions, human decisions, versioning, credit-note requests and audited reevaluation remain future application workflows.
 
 ## Architecture at a glance
 
@@ -140,7 +140,7 @@ Unknown POs return HTTP 404 with `{"detail":"Purchase order not found"}`. Missin
 
 ## In-memory matching (no database or model)
 
-The partial engine implements the unequivocal rejection/hold rules from the owner's supplied challenge sections 7/7.1. It does **not** resolve all challenge policies or expose a matching API. Run this example from the repository root after installing backend dependencies:
+The engine implements the confirmed pure rules from the supplied challenge and subsequent official client clarifications. It does **not** expose a matching API, execute payments, persist decisions or implement the human-review/audit workflows. Run this example from the repository root after installing backend dependencies:
 
 ```sh
 PYTHONPATH=backend backend/.venv/bin/python - <<'PY'
@@ -148,9 +148,9 @@ from datetime import date
 from decimal import Decimal as D
 from app.domain.entities import (
     Invoice, InvoiceLine, PurchaseOrder, PurchaseOrderLine,
-    GoodsReceivedNote, GoodsReceivedNoteLine,
+    GoodsReceivedNote, GoodsReceivedNoteLine, Supplier,
 )
-from app.domain.matching.types import LineAssociation, PolicyFacts
+from app.domain.matching.types import LineAssociation
 from app.domain.matching.engine import evaluate
 
 po = PurchaseOrder("EXAMPLE-PO", "SUP-X", date(2026, 6, 1), "EUR", "open",
@@ -160,11 +160,13 @@ invoice = Invoice("Example supplier", "RAW-TAX", "NEW-739", date(2026, 6, 2),
                   (InvoiceLine("Extracted fitting", D("5"), D("103"), D("515"), "raw / 7"),))
 grn = GoodsReceivedNote("EXAMPLE-GRN", po.po_number, date(2026, 6, 2),
                         (GoodsReceivedNoteLine(7, D("5")),))
+supplier = Supplier("SUP-X", "Example supplier", "RAW-TAX", "EUR", "active", "Address")
 result = evaluate(
-    invoice, (po,), (grn,), resolved_supplier_id="SUP-X",
+    invoice, (po,), (grn,), supplier=supplier,
     associations={0: LineAssociation(po.po_number, 7)},
-    # Illustrative verified facts for this example, not inferred by the engine:
-    policies=PolicyFacts(quantities_comparable=True, unit_prices_comparable=True),
+    approved_quantities={},  # Authoritative snapshot: nothing approved previously.
+    invoice_history=(),       # Authoritative snapshot: no other invoice cases.
+    net_unit_prices={0: D("103")},  # Explicit verified net price, not tax inference.
 )
 print(result.provisional_status, result.final_status, result.complete)
 print([rule.code for rule in result.pending])
@@ -174,20 +176,23 @@ PY
 Expected output:
 
 ```text
-Held for Review None False
-['DUPLICATE', 'SUPPLIER_ACTIVITY', 'PO_STATUS']
+Held for Review Held for Review True
+[]
 ```
 
 ### Result and caller contract
 
 - `evaluate` returns a frozen `EvaluationResult`: `provisional_status`, `final_status`, tuple `rules`, the immutable `config` snapshot, plus `pending` and `complete` properties. Each `RuleResult` has a stable code, `PASS`/`REJECT`/`HOLD`/`PENDING`, explanatory reason, and optional PO number, zero-based invoice line index and PO-local line number.
 - The engine alone applies `Rejected > Held for Review > Auto-Pay`. Available checks always run; pending checks are not passes. Provisional `Auto-Pay` means only **no discrepancy in available checks**, never permission to pay. Any mandatory pending check makes `complete=False` and `final_status=None`, even with provisional rejection/hold. Only a complete evaluation yields exactly one final business status.
-- The caller must resolve supplier identity explicitly: supplier name/tax ID are not normalized or guessed. Association mappings use zero-based invoice indices: omitted key means unresolved; `None` means confirmed no match (hold); `LineAssociation` means verified whole-line PO/local-line association. Raw text, descriptions and item codes are never parsed or fuzzy-matched. Invalid association targets remain pending; duplicate context identities/out-of-range indices raise `ValueError`.
-- Quantities sum supplied GRNs by PO plus local line with exact Decimal arithmetic. Multiple invoice lines sharing a PO line remain pending rather than reusing receipts. `quantities_comparable=True` must represent verified applicability of this receipt-total comparison, including partial/prior-invoice considerations; no prior quantities are subtracted. `unit_prices_comparable=True` must establish comparable tax basis. Currency mismatch and nonpositive reference prices still remain pending; no conversion, tax or credit policy is invented.
-- `PolicyFacts` defaults are unresolved. `duplicate=True/False` is an explicitly verified duplicate/nonduplicate fact, **not a duplicate detection algorithm**; absent evidence calls the named pending stub. `supplier_activity_cleared` and `po_status_cleared` mean externally verified applicable policy clearance, not assumptions that active/open always pass. Supplying every relevant verified fact permits completed evaluations; these inputs must not be used as a blanket bypass in a future integration. Unresolved status-policy failures cannot yet be classified by this partial engine.
+- Supply a resolved `supplier` entity: name/tax ID are not normalized or guessed. Every referenced PO is checked for existence, ownership, date and status. Inactive suppliers and closed POs hold; an explicit rejection always wins. Unknown supplier/PO status remains pending, never silently active/open.
+- Association mappings use zero-based invoice indices. `LineAssociation` identifies one reliable whole-line PO/local-line target; absent, `None`, ambiguous or invalid targets hold the invoice. Raw descriptions/reference text are never parsed or fuzzy-matched. Duplicate context identities and out-of-range indices raise `ValueError`.
+- Availability is all supplied matching GRN quantities minus `approved_quantities` for that PO-local target. Aggregate invoice lines sharing a target before comparing; any excess holds the whole invoice. GRNs represent actual receipts available at evaluation, with no invoice-date cutoff. History records alone never consume quantity. Application must provide only quantities previously approved for payment, not merely received/held invoices; a future transaction must revalidate this snapshot when approving.
+- `approved_quantities` uses `LineAssociation` keys and exact Decimal totals. `None` means unavailable evidence; `{}` is an authoritative empty approved ledger, with absent targets then meaning zero. `invoice_history=None` is missing evidence; `()` is confirmed empty history. These are not policy-bypass switches.
+- `InvoiceHistoryEntry` retains supplier ID, original number, date, currency and total for other cases. Same-supplier normalized number rejects regardless of amount/date/currency. A different normalized number with identical total/date holds only within the same supplier and currency. Normalization removes whitespace and ASCII hyphens and ignores case, preserving raw values. Application must exclude this case's versions; linked resubmissions, audit and repeat-payment protection are not implemented here.
+- Supply verified `net_unit_prices` by zero-based line index; missing values remain pending. Raw extraction fields are unchanged. Compare prices only in the PO currency; mismatch holds without conversion. Nonpositive PO reference prices and nonfinite comparison inputs remain pending; no per-line tax allocation or credit arithmetic is invented. The former `PolicyFacts` clearance/stub interface is replaced by these explicit inputs.
 - `MatchingConfig` defaults to fractional `Decimal('0.02')` price tolerance and `Decimal('5000')` analyst approval limit; both must be finite nonnegative Decimals. Exact ±2% passes, strictly greater differences hold. No arbitrary upper tolerance bound is imposed. The analyst limit is carried only, not enforced as a payment rule.
 
-Focused checks: `backend/.venv/bin/python -m pytest backend/tests/test_matching_rules.py backend/tests/test_matching_engine.py -q`.
+Focused checks: `backend/.venv/bin/python -m pytest backend/tests/test_matching_rules.py backend/tests/test_matching_duplicates.py backend/tests/test_matching_engine.py -q`.
 
 ## Verification
 
@@ -261,9 +266,11 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 ### D5 — Partial deterministic matching with explicit completeness
 
+**Historical status:** The initial pending-policy interface below was superseded by the official clarifications and decisions D7-D13. Current callers supply explicit supplier/history/approved-quantity/net-price facts; use the current contract above, not the old clearance switches.
+
 **Decision:** Reuse frozen domain entities, pure rejection/quantity/price checks, and one precedence engine. Implement the owner's supplied sections 7/7.1, with S6's correction: unresolved policies do not suppress available checks. Return provisional implemented-check status separately from final status/completeness. This is a partial implementation, not completion of all challenge business policies; the original PDF itself was not inspected for this work.
 
-**Trade-off and pending decisions:** Caller-verified supplier identity, associations and named policy facts keep ambiguous business decisions outside this engine without a generic policy framework. Duplicate criteria, partial invoicing, currency/tax treatment, inactive suppliers, closed POs and split/multi-PO allocation remain pending where evidence is absent. Repeated targets cannot reuse receipts. Changing an immutable configuration snapshot affects only the evaluation receiving it; existing results remain unchanged. Automatic reevaluation after parameter changes, corrections or later GRNs remains pending, as do manager configuration storage/endpoints, authorization, human overrides and audit history. No claim of their implementation is made here.
+**Initial trade-off:** Caller-verified supplier identity, associations and named policy facts originally kept unresolved business decisions outside the engine without a generic policy framework. Duplicate criteria, partial invoicing, currency/tax treatment, inactive suppliers, closed POs and split/multi-PO allocation were initially pending; the confirmed rules now replace those placeholders, with grouped quantities preventing receipt reuse. Changing an immutable configuration snapshot affects only the evaluation receiving it; existing results remain unchanged. Automatic reevaluation after parameter changes, corrections or later GRNs remains pending, as do manager configuration storage/endpoints, authorization, human overrides and audit history. No claim of their implementation is made here.
 
 ### D6 — Group matching by business capability
 
@@ -283,6 +290,36 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 **Design:** Ignore whitespace, hyphens and case in the comparison key, retaining the original number. The approved alert scope is the same supplier and currency, using invoice total and invoice date. Duplicate-number rejection itself does not depend on amount or currency. Application must supply history excluding the current case; linked versions and repeat-payment guards are later workflow responsibilities.
 
+### D9 — Net prices and cross-currency review
+
+**Client requirement:** Net-of-tax unit prices, inclusive symmetric 2% tolerance, no silent comparison across currencies.
+
+**Design:** Supply explicit net unit prices without modifying raw extracted values. Currency mismatch yields Held for Review without conversion. Do not derive per-line net prices from invoice-wide tax totals or invent a percentage basis for nonpositive PO prices.
+
+### D10 — Supplier activity, closed POs and reliable associations
+
+**Client requirement:** Inactive suppliers never Auto-Pay; closed POs alone do not reject; every referenced PO and supplier must be checked; unreliable line associations require review.
+
+**Design:** Inactive supplier and closed PO produce hold findings without suppressing any rejection or matching checks. A line must target one reliable PO-local line; do not guess from descriptions or silently split it across POs. Rejected always wins over Held for Review.
+
+### D11 — Corrections and linked resubmissions
+
+**Client requirement:** Relevant data corrections require reevaluation, invalidate the applicability of earlier human decisions, and preserve all versions/decisions.
+
+**Design:** A corrected rejected submission may create a linked version of the same case. Keep automatic evaluations, operational state, human decisions and audit separate. Linking a version never authorizes a second payment. Persisted versioning, decision invalidation, audit and transactional payment protection are not implemented by the pure engine.
+
+### D12 — Receipt and parameter reevaluation policy
+
+**Client requirement:** Use receipts available when evaluating; record parameter changes with actor/time.
+
+**Design:** New GRNs permit manual audited reevaluation rather than automatic import-triggered processing. New parameter snapshots affect future evaluations only, leaving historical snapshots/results intact. Manual reevaluation and parameter-management authorization/audit are later stages.
+
+### D13 — Credit-note request as a payment block
+
+**Client requirement:** Request comment and audit are mandatory; payment is blocked while pending; no full credit-note workflow.
+
+**Design:** Keep this operational block separate from the automatic matching result and historical human decisions. Request persistence, comment validation at that workflow boundary, audit and payment authorization checks are deferred; an Auto-Pay evaluation alone never authorizes payment.
+
 ## Current limitations
 
-This is local development infrastructure, not a production deployment: authentication, authorization, Azure OpenAI, uploads, matching API integration, and audit workflows are intentionally absent. Container images favor a simple reproducible scaffold over optimized size; frontend build dependencies remain in the image. No open business-policy questions are resolved by this scaffold.
+This is local development infrastructure, not a production deployment: authentication, authorization, Azure OpenAI, uploads, matching API integration, and audit workflows are intentionally absent. Container images favor a simple reproducible scaffold over optimized size; frontend build dependencies remain in the image. The official business answers are documented and their pure matching rules are implemented; operational workflows and the remaining undefined arithmetic/approval-limit policies are not silently supplied by the local scaffold.

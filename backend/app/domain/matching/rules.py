@@ -2,7 +2,7 @@
 from decimal import Decimal, localcontext
 
 from ..entities import (
-    GoodsReceivedNote, Invoice, InvoiceLine, PurchaseOrder, PurchaseOrderLine,
+    GoodsReceivedNote, Invoice, InvoiceLine, PurchaseOrder, PurchaseOrderLine, Supplier,
 )
 from .types import MatchingConfig, RuleResult
 
@@ -31,6 +31,31 @@ def check_invoice_date(invoice: Invoice, po: PurchaseOrder) -> RuleResult:
     if invoice.invoice_date < po.po_date:
         return RuleResult("INVOICE_DATE", "REJECT", "Invoice date precedes PO date.", po.po_number)
     return RuleResult("INVOICE_DATE", "PASS", "Invoice date is on or after PO date.", po.po_number)
+
+
+def check_supplier_activity(supplier: Supplier | None) -> RuleResult:
+    if supplier is None:
+        return RuleResult("SUPPLIER_ACTIVITY", "PENDING", "Supplier snapshot has not been supplied.")
+    if supplier.status == "inactive":
+        return RuleResult("SUPPLIER_ACTIVITY", "HOLD", "Inactive supplier cannot receive Auto-Pay.")
+    if supplier.status == "active":
+        return RuleResult("SUPPLIER_ACTIVITY", "PASS", "Supplier is active.")
+    return RuleResult("SUPPLIER_ACTIVITY", "PENDING", "Supplier activity status is not recognized.")
+
+
+def check_po_currency(invoice: Invoice, po: PurchaseOrder) -> RuleResult:
+    same = invoice.currency == po.currency
+    return RuleResult("PO_CURRENCY", "PASS" if same else "HOLD",
+                      "Invoice and PO currencies match." if same
+                      else "Invoice and PO currencies differ; no conversion is performed.", po.po_number)
+
+
+def check_po_status(po: PurchaseOrder) -> RuleResult:
+    if po.status == "closed":
+        return RuleResult("PO_STATUS", "HOLD", "Closed PO requires review, not automatic rejection.", po.po_number)
+    if po.status == "open":
+        return RuleResult("PO_STATUS", "PASS", "PO is open.", po.po_number)
+    return RuleResult("PO_STATUS", "PENDING", "PO status is not recognized.", po.po_number)
 
 
 def _exact_precision(values: tuple[Decimal, ...]) -> int:
