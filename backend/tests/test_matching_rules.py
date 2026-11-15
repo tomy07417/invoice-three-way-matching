@@ -84,11 +84,119 @@ def test_quantity_sum_and_po_local_isolation(invoice, po, grns, quantity, outcom
     line = replace(invoice.lines[0], quantity=Decimal(quantity))
     result = rules.check_quantity(line, po, po.lines[0], grns, 0)
     assert_rule(result, "QUANTITY", outcome,
-                "Invoiced quantity exceeds received quantity." if outcome == "HOLD"
-                else "Invoiced quantity is covered by receipts.",
+                "Invoiced quantity exceeds available quantity." if outcome == "HOLD"
+                else "Invoiced quantity is covered by available receipts.",
                 po_number=po.po_number, line_index=0)
     assert result.po_line_number == 7
     assert rules.check_quantity(line, po, po.lines[0], (), 0).outcome == "HOLD"
+
+
+@pytest.mark.parametrize("quantity,outcome", [
+    ("6", "PASS"), ("6.0001", "HOLD"), ("7", "HOLD"),
+])
+def test_quantity_subtracts_approved_consumption(invoice, po, quantity, outcome):
+    receipts = (GoodsReceivedNote(
+        "RECEIVED-TEN", po.po_number, invoice.invoice_date,
+        (GoodsReceivedNoteLine(7, Decimal("10")),),
+    ),)
+    line = replace(invoice.lines[0], quantity=Decimal(quantity))
+
+    result = rules.check_quantity(
+        line, po, po.lines[0], receipts, 2, approved_quantity=Decimal("4"),
+    )
+
+    assert result == RuleResult(
+        "QUANTITY", outcome,
+        "Invoiced quantity exceeds available quantity." if outcome == "HOLD"
+        else "Invoiced quantity is covered by available receipts.",
+        po.po_number, 2, 7,
+    )
+
+
+def test_quantity_default_is_zero_consumption(invoice, po, grns):
+    expected = RuleResult(
+        "QUANTITY", "PASS", "Invoiced quantity is covered by available receipts.",
+        po.po_number, 0, 7,
+    )
+    assert rules.check_quantity(invoice.lines[0], po, po.lines[0], grns, 0) == expected
+    assert rules.check_quantity(
+        invoice.lines[0], po, po.lines[0], grns, 0, approved_quantity=Decimal("0"),
+    ) == expected
+
+
+@pytest.mark.parametrize("quantity,outcome", [("4", "PASS"), ("4.0001", "HOLD")])
+def test_quantity_uses_all_received_grns_including_later_dates(
+    invoice, po, grns, quantity, outcome,
+):
+    # Two matching receipts total five; unrelated PO/local-line quantities do not count.
+    receipts = (grns[0], replace(grns[1], received_date=date(2026, 6, 3)), grns[2])
+    assert receipts[1].received_date > invoice.invoice_date
+    result = rules.check_quantity(
+        replace(invoice.lines[0], quantity=Decimal(quantity)), po, po.lines[0],
+        receipts, 0, approved_quantity=Decimal("1"),
+    )
+    assert result == RuleResult(
+        "QUANTITY", outcome,
+        "Invoiced quantity exceeds available quantity." if outcome == "HOLD"
+        else "Invoiced quantity is covered by available receipts.",
+        po.po_number, 0, 7,
+    )
+
+
+@pytest.mark.parametrize("quantity,outcome", [
+    ("0.9999999999999999999999999999", "PASS"),
+    ("1", "HOLD"),
+])
+def test_quantity_exact_subtraction_with_low_ambient_precision(invoice, po, quantity, outcome):
+    receipts = (GoodsReceivedNote(
+        "EXACT", po.po_number, invoice.invoice_date,
+        (GoodsReceivedNoteLine(7, Decimal("1")),
+         GoodsReceivedNoteLine(7, Decimal("0.0000000000000000000000000001"))),
+    ),)
+    with localcontext() as context:
+        context.prec = 3
+        result = rules.check_quantity(
+            replace(invoice.lines[0], quantity=Decimal(quantity)), po, po.lines[0],
+            receipts, 0, approved_quantity=Decimal("0.0000000000000000000000000002"),
+        )
+        assert context.prec == 3
+    assert result == RuleResult(
+        "QUANTITY", outcome,
+        "Invoiced quantity exceeds available quantity." if outcome == "HOLD"
+        else "Invoiced quantity is covered by available receipts.",
+        po.po_number, 0, 7,
+    )
+
+
+@pytest.mark.parametrize("value", ["NaN", "sNaN", "Infinity", "-Infinity"])
+@pytest.mark.parametrize("source", ["invoice", "receipt", "approved"])
+def test_quantity_nonfinite_evidence_is_pending(invoice, po, grns, value, source):
+    line = invoice.lines[0]
+    approved = Decimal("0")
+    if source == "invoice":
+        line = replace(line, quantity=Decimal(value))
+    elif source == "receipt":
+        grns = (replace(grns[0], lines=(GoodsReceivedNoteLine(7, Decimal(value)),)),)
+    else:
+        approved = Decimal(value)
+    result = rules.check_quantity(
+        line, po, po.lines[0], grns, 0, approved_quantity=approved,
+    )
+    assert result == RuleResult(
+        "QUANTITY", "PENDING", "Quantity comparison requires finite values.",
+        po.po_number, 0, 7,
+    )
+
+
+@pytest.mark.parametrize("approved", [None, 0, "0"])
+def test_quantity_unsupported_approved_evidence_is_pending(invoice, po, grns, approved):
+    result = rules.check_quantity(
+        invoice.lines[0], po, po.lines[0], grns, 0, approved_quantity=approved,
+    )
+    assert result == RuleResult(
+        "QUANTITY", "PENDING", "Quantity comparison requires finite values.",
+        po.po_number, 0, 7,
+    )
 
 
 @pytest.mark.parametrize("price,outcome", [

@@ -41,19 +41,31 @@ def _exact_precision(values: tuple[Decimal, ...]) -> int:
 
 
 def check_quantity(line: InvoiceLine, po: PurchaseOrder, po_line: PurchaseOrderLine,
-                   grns: tuple[GoodsReceivedNote, ...], line_index: int) -> RuleResult:
+                   grns: tuple[GoodsReceivedNote, ...], line_index: int, *,
+                   approved_quantity: Decimal = Decimal("0")) -> RuleResult:
+    """Compare quantity with PO-local receipts less already-approved consumption.
+
+    The caller supplies authoritative consumption approved for payment for this
+    PO line, not quantities from all received or held invoices. Omission means
+    zero prior approved consumption. Supplied GRNs represent actual receipts at
+    evaluation time, including GRNs dated after the invoice. The caller groups
+    invoice quantities sharing this PO line before comparison; this rule does
+    not query history, allocate receipts, or decide partial payments.
+    """
     quantities = tuple(receipt.quantity_received for note in grns if note.po_number == po.po_number
                        for receipt in note.lines if receipt.po_line_number == po_line.line_number)
-    if any(not value.is_finite() for value in (*quantities, line.quantity)):
+    values = (*quantities, line.quantity, approved_quantity)
+    if any(not isinstance(value, Decimal) or not value.is_finite() for value in values):
         return RuleResult("QUANTITY", "PENDING", "Quantity comparison requires finite values.",
                           po.po_number, line_index, po_line.line_number)
     with localcontext() as context:
-        context.prec = _exact_precision((*quantities, line.quantity))
+        context.prec = _exact_precision(values)
         received = sum(quantities, Decimal("0"))
-        exceeds = line.quantity > received
+        available = received - approved_quantity
+        exceeds = line.quantity > available
     return RuleResult("QUANTITY", "HOLD" if exceeds else "PASS",
-                      "Invoiced quantity exceeds received quantity." if exceeds
-                      else "Invoiced quantity is covered by receipts.",
+                      "Invoiced quantity exceeds available quantity." if exceeds
+                      else "Invoiced quantity is covered by available receipts.",
                       po.po_number, line_index, po_line.line_number)
 
 

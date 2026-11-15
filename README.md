@@ -271,6 +271,12 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 **Rationale and boundary:** A capability-specific module makes the core business responsibility easier to find than a generic `services/` directory. The engine still receives resolved data and performs no I/O. Future application use cases may retrieve data through ports, invoke the engine, and persist results; no `evaluate_invoice.py` use case, repository integration, compatibility wrappers, or new abstractions are introduced here.
 
+### D7 — Received quantity less approved consumption
+
+**Client requirement:** Only quantities previously approved for payment reduce availability; merely received or held invoices do not. Excess quantity holds the entire invoice, not part of it. Receipts actually available at evaluation count regardless of their date relative to the invoice.
+
+**Design:** Application supplies an authoritative PO-local approved-quantity snapshot and the received GRNs. Sum invoice lines sharing a reliable PO-line target before comparing against receipts minus approved quantities. Missing context is not zero consumption. Atomic revalidation and approval recording belong to a later transaction; a pure snapshot is not concurrency protection.
+
 ## Current limitations
 
 This is local development infrastructure, not a production deployment: authentication, authorization, Azure OpenAI, uploads, matching API integration, and audit workflows are intentionally absent. Container images favor a simple reproducible scaffold over optimized size; frontend build dependencies remain in the image. No open business-policy questions are resolved by this scaffold.
