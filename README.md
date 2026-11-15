@@ -277,6 +277,12 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 **Design:** Application supplies an authoritative PO-local approved-quantity snapshot and the received GRNs. Sum invoice lines sharing a reliable PO-line target before comparing against receipts minus approved quantities. Missing context is not zero consumption. Atomic revalidation and approval recording belong to a later transaction; a pure snapshot is not concurrency protection.
 
+### D8 — Explicit duplicate-number normalization
+
+**Client requirement:** Same supplier and invoice number rejects regardless of file/amount; different number with identical amount/date requires review.
+
+**Design:** Ignore whitespace, hyphens and case in the comparison key, retaining the original number. The approved alert scope is the same supplier and currency, using invoice total and invoice date. Duplicate-number rejection itself does not depend on amount or currency. Application must supply history excluding the current case; linked versions and repeat-payment guards are later workflow responsibilities.
+
 ## Current limitations
 
 This is local development infrastructure, not a production deployment: authentication, authorization, Azure OpenAI, uploads, matching API integration, and audit workflows are intentionally absent. Container images favor a simple reproducible scaffold over optimized size; frontend build dependencies remain in the image. No open business-policy questions are resolved by this scaffold.

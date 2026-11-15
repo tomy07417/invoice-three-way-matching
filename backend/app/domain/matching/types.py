@@ -1,5 +1,6 @@
 """Immutable inputs and findings for a single matching evaluation snapshot."""
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Literal
 
@@ -25,6 +26,20 @@ class LineAssociation:
     """Caller-verified whole-line association, never parsed from raw extraction."""
     po_number: str
     po_line_number: int
+
+
+@dataclass(frozen=True)
+class InvoiceHistoryEntry:
+    """Original invoice header from another case, supplied by Application.
+
+    History completeness and excluding this case's versions are caller duties;
+    this record neither records approval nor authorizes any payment.
+    """
+    supplier_id: str
+    invoice_number: str
+    invoice_date: date
+    currency: str
+    total_amount: Decimal
 
 
 @dataclass(frozen=True)
