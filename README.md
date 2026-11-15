@@ -196,6 +196,16 @@ Focused checks: `backend/.venv/bin/python -m pytest backend/tests/test_matching_
 
 ## Verification
 
+### Confirmed-policy verification record
+
+The confirmed-policy implementation passed **201 backend tests with no skips** against a disposable PostgreSQL instance, including **129 matching tests**. The documented in-memory example also passed with exact stdout and empty stderr. These are observed local results for this implementation, not production certification or evidence that the deferred workflows exist.
+
+Coverage includes approved-only consumption, grouped quantities, duplicate normalization, same-supplier/currency similarity, net-price tolerance, every referenced PO, inactive/closed states, ambiguous associations, later GRNs, missing evidence, precedence and immutable evaluation snapshots.
+
+Corrections/versioning, human-decision invalidation, credit-note payment blocks, audited manual reevaluation, authorization and atomic approval recording still require application/persistence work. A successful matching evaluation alone never authorizes a payment.
+
+### Run checks
+
 From the repository root after dependency installation:
 
 ```sh
