@@ -12,7 +12,7 @@ The three documents serve different purposes:
 | Purchase Order (PO) | What was ordered, from which supplier, and at what agreed price. |
 | Goods Received Note (GRN) | What was received; several GRNs can contribute to the received quantity of one PO line. |
 
-The intended workflow is to upload an invoice, extract structured fields with Azure OpenAI, retrieve the relevant reference data, and run deterministic Python checks. **The model extracts data; it does not decide payment outcomes.** Extraction, upload, and this application-level orchestration are not implemented yet.
+The intended workflow is to upload an invoice, extract structured fields with Azure OpenAI, retrieve the relevant reference data, and run deterministic Python checks. **The model extracts data; it does not decide payment outcomes.** Upload and extraction are not implemented yet. Structured invoices can now be evaluated and their evidence persisted through the application use case below; no evaluation HTTP endpoint is exposed.
 
 The matching engine evaluates resolved input data with this precedence:
 
@@ -30,20 +30,21 @@ Price tolerance defaults to **2% per line**, using exact Decimal arithmetic. The
 | Reference data | Domain entities, explicit migrations, and an atomic, repeatable JSON importer for suppliers, POs, and GRNs. |
 | PO inspection | Read-only HTTP endpoint with PO lines and received quantities aggregated across GRNs. |
 | Matching | Pure in-memory engine for confirmed matching policies, explicit historical/approval inputs, structured reasons and missing-evidence reporting; not connected to an API or the UI. |
-| Invoice workflow | Upload, Azure OpenAI extraction, evaluation orchestration, human review, and audit history are not implemented. |
+| Evaluation integration | Structured-input use case, consistent PostgreSQL context, versioned configuration, append-only evaluation/findings and evidence snapshots. No evaluation API/UI. |
+| Invoice workflow | Upload, Azure OpenAI extraction, corrections, human review, approvals and payments remain unimplemented. |
 
-The client has clarified the nine previously open business questions; [the PRD](docs/PRD.md#official-client-clarifications) records those requirements separately from the accepted design policies below. The clarified pure rules are implemented independently of operational integration. Approval transactions, human decisions, versioning, credit-note requests and audited reevaluation remain future application workflows.
+The client has clarified the nine previously open business questions; [the PRD](docs/PRD.md#official-client-clarifications) records those requirements separately from the accepted design policies below. The clarified pure rules are implemented independently of operational integration. Approval transactions, human decisions, corrected-invoice versioning, credit-note requests and a user-facing reevaluation workflow remain future work. Explicit evaluation of unchanged input now appends audited evidence without replacing earlier results.
 
 ## Architecture at a glance
 
 The backend is a **single hexagonal monolith**, not a set of microservices:
 
 - **Domain** (`backend/app/domain/`): framework-independent entities and `matching/`, which receives resolved facts and evaluates rules without I/O.
-- **Application** (`backend/app/application/`): use cases and ports for orchestration. Reference-data import and PO queries exist; invoice evaluation orchestration does not.
+- **Application** (`backend/app/application/`): use cases and ports for orchestration. Reference-data import, PO queries and structured invoice evaluation exist.
 - **Infrastructure** (`backend/app/infrastructure/`): concrete adapters, including PostgreSQL persistence and JSON reference-data reading.
 - **Interfaces** (`backend/app/interfaces/`): HTTP routes and the import CLI. `main.py` wires the backend components together.
 
-The Next.js frontend communicates with the FastAPI backend over HTTP; it never accesses the database or an extraction model directly. PostgreSQL stores reference data; invoice tables exist, but invoice-processing and decision persistence workflows are not wired up. See [Architecture](docs/ARCHITECTURE.md) for dependency rules and the proposed extension points.
+The Next.js frontend communicates with the FastAPI backend over HTTP; it never accesses the database or an extraction model directly. PostgreSQL stores reference data, raw invoices and automatic evaluation evidence. Human decisions and payment workflows are not wired up. See [Architecture](docs/ARCHITECTURE.md) for dependency rules and the proposed extension points.
 
 ## Quick start with Docker Compose
 
@@ -100,7 +101,7 @@ For a built Compose backend image, with Compose environment configured:
 docker compose run --rm backend alembic upgrade head
 ```
 
-Repeating `upgrade head` is safe. Rollback is explicit (`alembic downgrade base`, using the same config/location) and **drops these tables and their stored data**; it is not a troubleshooting step for a persistent development volume. Review backups and target before any downgrade.
+Repeating `upgrade head` is safe. Rollback is explicit (`alembic downgrade base`, using the same config/location) and **drops these tables and their stored data**; it is not a troubleshooting step for a persistent development volume. Review backups and target before any downgrade. Downgrading only `0002` retains raw invoice tables but discards evaluation history, configurations, approved-consumption facts and the new identity/state metadata.
 
 ## Import reference data
 
@@ -137,6 +138,60 @@ curl --fail http://127.0.0.1:8000/purchase-orders/PO-2026-0102
 Received quantity is the sum across all GRNs for that PO and its local line number. Ordered lines with no receipts remain present with `"0"`. This is a reference-data read, not a matching/payment decision: it does not subtract prior invoices or enforce supplier/PO status policy.
 
 Unknown POs return HTTP 404 with `{"detail":"Purchase order not found"}`. Missing/invalid database configuration or database read failures return HTTP 503 with `{"detail":"Database unavailable"}`, without connection/SQL details. Database configuration and connections are lazy at query time: `/health` and unknown routes remain available without a configured database. API startup and reads never migrate, import, or write reference data. Interactive response schemas are available at `/docs`.
+
+## Evaluate a structured invoice with PostgreSQL
+
+`EvaluateInvoiceUseCase.execute(EvaluateInvoiceCommand(...))` is the public integration interface. It accepts a frozen domain `Invoice`, trusted actor/origin metadata, an explicit supplier ID, reliable zero-based line associations and verified net unit prices. It performs no extraction, fuzzy association, tax derivation or authentication. Entry points must establish caller trust before invoking it.
+
+One PostgreSQL **REPEATABLE READ** transaction registers the input, reads reference data/configuration/other-case history/approved quantities, invokes the existing pure engine, and persists all findings and original context before returning. Failures, including commit failures, roll back staged invoice/evaluation changes; database errors expose no connection details. Reading all reference data is appropriate for the challenge dataset, not a large-scale query strategy.
+
+- Migration `0002` preserves existing invoices and raw/nonexistent references. It adds nullable resolved supplier identity, technical state, `rule_configuration_versions`, `approved_payment_quantities`, `invoice_evaluations` and ordered `evaluation_rule_findings`.
+- The **initially empty approval ledger is authoritative**, as confirmed by the owner. Evaluating only reads it: received, rejected, held and Auto-Pay evaluations never create approved consumption or payments. Future approval transactions must revalidate quantities atomically; snapshot isolation alone does not prevent overapproval.
+- Configuration is selected by effective evaluation time, seeded with tolerance `0.02` and analyst limit `5000`. Each evaluation retains its configuration ID and exact values. There is no configuration-management endpoint or authorization workflow.
+- Operational states are `received`, `evaluated` and `evaluation_incomplete`, separate from automatic outcomes. Missing mandatory evidence preserves `final_status=None`; an unresolved supplier on another invoice makes history unavailable, not authoritatively empty.
+- Supply `invoice_id` to reevaluate **identical raw input** as the same case, excluding it from duplicate history. Each invocation appends a new evaluation. Different raw data raises a conflict; corrected versions, linked resubmissions and human-decision invalidation are not implemented.
+- Evidence includes actor/origin/time, all PASS/HOLD/REJECT/PENDING findings and JSON snapshots with exact Decimal strings. Snapshots are detached copies and must not be edited by consumers. Append-only is the repository contract, not database-admin tamper protection.
+
+### Application example
+
+**This writes an invoice and evaluation.** Run only against a disposable database you intentionally configured, after `upgrade head` and the reference import above. It uses the supplied `PO-2026-0102`; it does not authorize payment. Re-running without the original `invoice_id` creates a different case and may trigger duplicate rejection. Results also depend on existing history and approvals.
+
+<!-- application-evaluation-example -->
+```sh
+PYTHONPATH=backend backend/.venv/bin/python - <<'PY'
+from decimal import Decimal as D
+from app.application.dtos.invoice_evaluation import EvaluateInvoiceCommand
+from app.application.use_cases.evaluate_invoice import EvaluateInvoiceUseCase
+from app.domain.entities import Invoice, InvoiceLine
+from app.domain.matching.types import LineAssociation
+from app.infrastructure.persistence.connection import create_database_engine
+from app.infrastructure.persistence.invoice_evaluation_repository import SqlAlchemyInvoiceEvaluationRepository
+from app.infrastructure.persistence.reference_data_repository import SqlReferenceDataRepository
+
+engine = create_database_engine()
+try:
+    with SqlReferenceDataRepository(engine).transaction() as transaction:
+        reference = transaction.load()
+    po = next(item for item in reference.purchase_orders if item.po_number == "PO-2026-0102")
+    line = next(item for item in po.lines if item.line_number == 1)
+    supplier = next(item for item in reference.suppliers if item.supplier_id == po.supplier_id)
+    invoice = Invoice(supplier.legal_name, supplier.tax_id, "APPLICATION-EXAMPLE-001", po.po_date,
+                      None, (po.po_number,), po.currency, line.unit_price, D("0"), line.unit_price,
+                      (InvoiceLine(line.description, D("1"), line.unit_price, line.unit_price, None),))
+    command = EvaluateInvoiceCommand(
+        invoice, actor_id="local-example", supplier_id=supplier.supplier_id,
+        associations={0: LineAssociation(po.po_number, line.line_number)},
+        net_unit_prices={0: line.unit_price},
+    )
+    saved = EvaluateInvoiceUseCase(SqlAlchemyInvoiceEvaluationRepository(engine)).execute(command)
+    print(f"invoice_id={saved.invoice_id} evaluation_id={saved.evaluation_id} "
+          f"status={saved.result.final_status} complete={saved.result.complete}")
+finally:
+    engine.dispose()
+PY
+```
+
+The printed IDs identify persisted records. Use `repository.transaction()` and `transaction.get_evaluation(id)` / `list_evaluations(invoice_id)` to retrieve historical evidence, rather than rerunning matching against today's context. A successful complete result can still be Held for Review or Rejected.
 
 ## In-memory matching (no database or model)
 
@@ -196,13 +251,19 @@ Focused checks: `backend/.venv/bin/python -m pytest backend/tests/test_matching_
 
 ## Verification
 
+### Application integration verification record
+
+The integrated implementation passed **256 backend tests with no failures or skips** on disposable PostgreSQL 17, including **55 new tests**: seven command contracts, 30 application tests, seven adapter tests, nine cross-layer/example tests and two migration/constraint tests. The full run completed in 101.55s. The application example is tested from its literal README source with exact stdout, empty stderr and persisted evidence checks. Independent verification passed all feature specifications, 55 focused checks and three isolated migration/rollback/concurrent-context probes. Those three probes were then promoted into `test_evaluation_independent.py`, using public repository observations for business state, and passed separately in 3.10s; production code did not change after the 256-test full run.
+
+A separate differential against `f562a53` ran the previous and new import CLI and real HTTP servers against the new schema with persisted incomplete-evaluation data. Repeat imports, rejected source/unsupported inputs, health, PO inspection and unknown resources retained identical CLI exit/stdout/stderr and HTTP status/body. Failed imports and reads left invoice evidence, technical state and approved totals unchanged. Original migration0001, domain rules, HTTP routes and dependencies were not changed.
+
 ### Confirmed-policy verification record
 
 The confirmed-policy implementation passed **201 backend tests with no skips** against a disposable PostgreSQL instance, including **129 matching tests**. The documented in-memory example also passed with exact stdout and empty stderr. These are observed local results for this implementation, not production certification or evidence that the deferred workflows exist.
 
 Coverage includes approved-only consumption, grouped quantities, duplicate normalization, same-supplier/currency similarity, net-price tolerance, every referenced PO, inactive/closed states, ambiguous associations, later GRNs, missing evidence, precedence and immutable evaluation snapshots.
 
-Corrections/versioning, human-decision invalidation, credit-note payment blocks, audited manual reevaluation, authorization and atomic approval recording still require application/persistence work. A successful matching evaluation alone never authorizes a payment.
+Corrections/versioning, human-decision invalidation, credit-note payment blocks, a user-facing reevaluation workflow, authorization and atomic approval recording still require application/persistence work. Automatic evaluation persistence and explicit same-input reevaluation are now implemented through the application interface above. A successful matching evaluation alone never authorizes a payment.
 
 ### Run checks
 
@@ -250,7 +311,7 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 **Trade-off:** Explicit boundaries introduce additional interfaces, data conversions, and indirection compared with a conventional layered implementation. For a small application, that can increase navigation and implementation effort without an immediate payoff.
 
-**Scope and guardrail:** Retain a single monolith and introduce ports only at real integration boundaries. Do not create an interface for every class or add abstractions for hypothetical future replacements. The goal is isolated, testable business rules, not maximum abstraction. The directory boundaries now contain domain entities and persistence adapters; the partial deterministic matching engine now lives in Domain; extraction, integration and human-review workflows remain future work.
+**Scope and guardrail:** Retain a single monolith and introduce ports only at real integration boundaries. Do not create an interface for every class or add abstractions for hypothetical future replacements. The goal is isolated, testable business rules, not maximum abstraction. The directory boundaries now contain domain entities, the pure matching engine, application evaluation and persistence adapters; extraction, HTTP evaluation integration and human-review workflows remain future work.
 
 ### D2 — Synchronous SQLAlchemy persistence and explicit Alembic migrations
 
@@ -322,7 +383,7 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 **Client requirement:** Use receipts available when evaluating; record parameter changes with actor/time.
 
-**Design:** New GRNs permit manual audited reevaluation rather than automatic import-triggered processing. New parameter snapshots affect future evaluations only, leaving historical snapshots/results intact. Manual reevaluation and parameter-management authorization/audit are later stages.
+**Design:** New GRNs permit manual audited reevaluation rather than automatic import-triggered processing. New parameter snapshots affect future evaluations only, leaving historical snapshots/results intact. Explicit same-input reevaluation now appends automatic evaluation evidence; a user-facing manual workflow and parameter-management authorization/audit remain later stages.
 
 ### D13 — Credit-note request as a payment block
 
@@ -330,6 +391,12 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 **Design:** Keep this operational block separate from the automatic matching result and historical human decisions. Request persistence, comment validation at that workflow boundary, audit and payment authorization checks are deferred; an Auto-Pay evaluation alone never authorizes payment.
 
+### D14 — Transactional structured-invoice evaluation
+
+**Decision:** Add one evaluation transaction port, immutable command/configuration/record DTOs and a PostgreSQL adapter around the unchanged domain engine. Reuse the session-bound reference repository and existing raw invoice tables, with a new `0002` migration rather than rewriting `0001`. Select effective configuration and retain full input/context, ordered findings and actor/time evidence for every invocation.
+
+**Rationale/trade-off:** REPEATABLE READ keeps multiple context queries coherent and registration/results atomic, but serialization failures may require an explicit caller retry; no automatic retries or concurrent approval protection are provided. Existing `invoice_id` requires identical raw input, enabling self-history exclusion without implementing correction/version workflows. The owner confirmed an initially empty authoritative approved-quantity ledger. Technical state is never approval, and append-only application history is not an admin-proof audit log. No new dependencies or evaluation endpoint are introduced.
+
 ## Current limitations
 
-This is local development infrastructure, not a production deployment: authentication, authorization, Azure OpenAI, uploads, matching API integration, and audit workflows are intentionally absent. Container images favor a simple reproducible scaffold over optimized size; frontend build dependencies remain in the image. The official business answers are documented and their pure matching rules are implemented; operational workflows and the remaining undefined arithmetic/approval-limit policies are not silently supplied by the local scaffold.
+This is local development infrastructure, not a production deployment: authentication, authorization, Azure OpenAI, uploads, matching API integration, and human-decision/audit-view workflows are intentionally absent. Container images favor a simple reproducible scaffold over optimized size; frontend build dependencies remain in the image. The official business answers are documented and their pure matching rules are implemented; operational workflows and the remaining undefined arithmetic/approval-limit policies are not silently supplied by the local scaffold.
