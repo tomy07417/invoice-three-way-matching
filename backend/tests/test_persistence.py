@@ -56,6 +56,8 @@ def test_model_metadata_preserves_domain_shapes():
     assert set(Base.metadata.tables) == {
         "suppliers", "purchase_orders", "purchase_order_lines", "goods_received_notes",
         "goods_received_note_lines", "invoices", "invoice_lines", "invoice_po_references",
+        "rule_configuration_versions", "approved_payment_quantities", "invoice_evaluations",
+        "evaluation_rule_findings",
     }
     assert list(PurchaseOrderLine.__table__.primary_key.columns.keys()) == ["po_number", "line_number"]
     assert list(GoodsReceivedNoteLine.__table__.primary_key.columns.keys()) == ["grn_number", "po_line_number"]
@@ -87,6 +89,44 @@ def test_migration_roundtrip_and_repeat(database_url, alembic_cli):
         assert set(inspect(engine).get_table_names()) == set(Base.metadata.tables) | {"alembic_version"}
     finally:
         engine.dispose()
+
+
+def test_upgrade_existing_invoice(database_url, alembic_cli):
+    from sqlalchemy import create_engine
+    from app.infrastructure.persistence.invoice_evaluation_repository import SqlAlchemyInvoiceEvaluationRepository
+
+    alembic_cli("upgrade", "0001")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as c:
+            invoice_id = c.scalar(text("INSERT INTO invoices (supplier_name, supplier_tax_id, invoice_number, invoice_date, currency, subtotal, tax_amount, total_amount) VALUES ('old', 'raw', 'original', '2020-01-01', 'USD', 1, 0, 1) RETURNING id"))
+            c.execute(text("INSERT INTO invoice_po_references VALUES (:id, 0, 'unknown')"), {"id": invoice_id})
+            c.execute(text("INSERT INTO invoice_lines VALUES (:id, 7, 'legacy', 1, 1, 1, 'raw')"), {"id": invoice_id})
+        alembic_cli("upgrade", "head")
+        with SqlAlchemyInvoiceEvaluationRepository(engine).transaction() as tx:
+            raw = tx.get_invoice(invoice_id)
+            assert raw.invoice_number == "original"
+            assert raw.po_references == ("unknown",)
+            assert raw.lines[0].description == "legacy"
+            assert tx.get_invoice_state(invoice_id) == "received"
+            assert tx.get_approved_quantities(("unknown",)) == {}
+            assert tx.list_evaluations(invoice_id) == ()
+    finally:
+        engine.dispose()
+
+
+def test_evaluation_constraints(migrated_engine):
+    for statement in (
+        "INSERT INTO invoices (supplier_name, supplier_tax_id, invoice_number, invoice_date, currency, subtotal, tax_amount, total_amount, operational_state) VALUES ('a', 'b', 'c', '2020-01-01', 'USD', 1, 0, 1, 'paid')",
+        "INSERT INTO rule_configuration_versions (effective_from, price_tolerance, analyst_approval_limit, actor_id) VALUES (now(), -1, 5000, 'actor')",
+    ):
+        with pytest.raises(IntegrityError), migrated_engine.begin() as c:
+            c.execute(text(statement))
+    with migrated_engine.begin() as c:
+        invoice_id = c.scalar(text("INSERT INTO invoices (supplier_name, supplier_tax_id, invoice_number, invoice_date, currency, subtotal, tax_amount, total_amount) VALUES ('a', 'b', 'c', '2020-01-01', 'USD', 1, 0, 1) RETURNING id"))
+    for complete, final, provisional in ((False, 'Auto-Pay', 'Auto-Pay'), (True, None, 'Auto-Pay'), (True, 'invalid', 'invalid')):
+        with pytest.raises(IntegrityError), migrated_engine.begin() as c:
+            c.execute(text("INSERT INTO invoice_evaluations (invoice_id, configuration_id, price_tolerance, analyst_approval_limit, evaluated_at, actor_id, origin, provisional_status, final_status, complete, input_snapshot, context_snapshot) VALUES (:id, 1, 0.02, 5000, now(), 'actor', 'test', :provisional, :final, :complete, '{}', '{}')"), {"id": invoice_id, "provisional": provisional, "final": final, "complete": complete})
 
 
 def test_postgresql_constraints_and_exact_values(migrated_engine):

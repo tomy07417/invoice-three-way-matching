@@ -7,7 +7,7 @@ text, deliberately not foreign keys to reference data that may not exist.
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, ForeignKeyConstraint, Identity, Numeric, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, ForeignKey, ForeignKeyConstraint, Identity, Numeric, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -79,7 +79,12 @@ class GoodsReceivedNoteLine(Base):
 
 class Invoice(Base):
     __tablename__ = "invoices"
+    __table_args__ = (CheckConstraint(
+        "operational_state IN ('received', 'evaluated', 'evaluation_incomplete')",
+        name="ck_invoice_operational_state"),)
 
+    resolved_supplier_id: Mapped[str | None] = mapped_column(ForeignKey("suppliers.supplier_id"))
+    operational_state: Mapped[str] = mapped_column(server_default="received")
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     supplier_name: Mapped[str]
     supplier_tax_id: Mapped[str]
@@ -110,3 +115,7 @@ class InvoicePOReference(Base):
     invoice_id: Mapped[int] = mapped_column(ForeignKey("invoices.id"), primary_key=True)
     position: Mapped[int] = mapped_column(primary_key=True)
     po_number: Mapped[str]
+
+
+# Register evaluation tables for shared metadata consumers (including Alembic).
+from app.infrastructure.persistence import evaluation_records  # noqa: E402,F401
