@@ -231,6 +231,18 @@ PYTHONPATH="$PWD/backend:$PWD" backend/.venv/bin/python -m pytest backend/tests/
 
 This adapter is single-attempt. Upload, authentication, private storage and durable orchestration are separate implementation units.
 
+## Local demo sessions (backend service)
+
+The optional session router supports login, current-session inspection and CSRF-protected logout. Server-side accounts determine roles; Intake access is restricted to owned documents. This service is not wired into the default API yet. Sessions use opaque tokens, stored hashes and explicit expiry.
+
+After migrating, provision an account with an interactive password prompt:
+
+```sh
+PYTHONPATH=backend backend/.venv/bin/python -m app.interfaces.cli.provision_user --username intake-demo --role intake
+```
+
+For automation use `--password-env VARIABLE_NAME`, never a password argument. Roles are `intake`, `ap_analyst`, `ap_manager`; provisioning cannot overwrite an account. This local-demo service does not implement production throttling or account recovery.
+
 ## In-memory matching (no database or model)
 
 The engine implements the confirmed pure rules from the supplied challenge and subsequent official client clarifications. It does **not** expose a matching API, execute payments, persist decisions or implement the human-review/audit workflows. Run this example from the repository root after installing backend dependencies:
