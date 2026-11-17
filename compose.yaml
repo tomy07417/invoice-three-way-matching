@@ -21,9 +21,19 @@ services:
       context: ./backend
     environment:
       POSTGRES_HOST: database
+      INVOICE_PROCESSING_ENABLED: ${INVOICE_PROCESSING_ENABLED:-0}
+      INVOICE_STORAGE_ROOT: /var/lib/invoice-documents
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
+      MAX_ACTIVE_EXTRACTIONS: ${MAX_ACTIVE_EXTRACTIONS:-1}
+      MAX_PENDING_INVOICES: ${MAX_PENDING_INVOICES:-20}
+      SESSION_SECURE_COOKIE: ${SESSION_SECURE_COOKIE:-0}
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - invoice_documents:/var/lib/invoice-documents
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -54,3 +64,4 @@ services:
 
 volumes:
   postgres_data:
+  invoice_documents:

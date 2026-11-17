@@ -12,7 +12,7 @@ The three documents serve different purposes:
 | Purchase Order (PO) | What was ordered, from which supplier, and at what agreed price. |
 | Goods Received Note (GRN) | What was received; several GRNs can contribute to the received quantity of one PO line. |
 
-The intended workflow is to upload an invoice, extract structured fields with Azure OpenAI, retrieve the relevant reference data, and run deterministic Python checks. **The model extracts data; it does not decide payment outcomes.** A standalone Azure extraction adapter is implemented; upload and orchestration remain future work. Structured invoices can now be evaluated and their evidence persisted through the application use case below; no evaluation HTTP endpoint is exposed.
+The intended workflow is to upload an invoice, extract structured fields with Azure OpenAI, retrieve the relevant reference data, and run deterministic Python checks. **The model extracts data; it does not decide payment outcomes.** The opt-in backend accepts private uploads, processes durable Azure extraction jobs and atomically persists deterministic evaluations when mandatory evidence is available. The Intake frontend and human-review workflows remain pending. See [durable processing setup and retry rules](docs/INVOICE_PROCESSING.md). Structured invoices can also be evaluated through the application use case below.
 
 The matching engine evaluates resolved input data with this precedence:
 
@@ -31,7 +31,8 @@ Price tolerance defaults to **2% per line**, using exact Decimal arithmetic. The
 | PO inspection | Read-only HTTP endpoint with PO lines and received quantities aggregated across GRNs. |
 | Matching | Pure in-memory engine for confirmed matching policies, explicit historical/approval inputs, structured reasons and missing-evidence reporting; not connected to an API or the UI. |
 | Evaluation integration | Structured-input use case, consistent PostgreSQL context, versioned configuration, append-only evaluation/findings and evidence snapshots. No evaluation API/UI. |
-| Invoice workflow | Upload, Azure OpenAI extraction, corrections, human review, approvals and payments remain unimplemented. |
+| Extraction adapter | Async single-attempt Azure Responses adapter, strict nullable schema, exact Decimal/date parsing and sanitized retry classification; integrated with durable jobs. |
+| Invoice workflow | Opt-in authenticated upload/status/detail/private-document API, durable extraction and atomic evaluation linkage. Frontend, corrections, human review, approvals and payments remain unimplemented. |
 
 The client has clarified the nine previously open business questions; [the PRD](docs/PRD.md#official-client-clarifications) records those requirements separately from the accepted design policies below. The clarified pure rules are implemented independently of operational integration. Approval transactions, human decisions, corrected-invoice versioning, credit-note requests and a user-facing reevaluation workflow remain future work. Explicit evaluation of unchanged input now appends audited evidence without replacing earlier results.
 
@@ -221,7 +222,7 @@ To borrow an existing reusable `httpx.AsyncClient`, pass it as the first constru
 
 PDFs are sent directly as base64 `input_file`; PNG/JPEG use base64 `input_image`. Requests use `store:false`, low reasoning effort and strict `text.format` JSON schema with all keys required and unknown values nullable. The model is instructed to extract only, never approve or reject payment. Provider error bodies, transport exception chains, filenames and credentials are not included in adapter errors or logs (the adapter does not log). Successful extracted text/warnings remain private document data, not safe log messages.
 
-**Retry and throughput boundary:** each `extract` call makes one HTTP request, without retry sleeps. HTTP 429, 5xx, network failures/timeouts and malformed responses are retryable attempt failures; 401/403 and other non-200 responses (including redirects/400) are terminal. Valid `Retry-After` seconds or HTTP dates are returned as a delay, not slept inside the adapter. Unknown token consumption after failure is not zero. Successful responses require valid, consistent token counters. A future durable processor must enforce finite retries with backoff/jitter, active-call limits and the 10,000-token/minute budget; connection limits alone do not provide global concurrency or TPM enforcement.
+**Retry and throughput boundary:** each `extract` call makes one HTTP request, without retry sleeps. HTTP 429, 5xx, network failures/timeouts and malformed responses are retryable attempt failures; 401/403 and other non-200 responses (including redirects/400) are terminal. Valid `Retry-After` seconds or HTTP dates are returned as a delay, not slept inside the adapter. Unknown token consumption after failure is not zero. Successful responses require valid, consistent token counters. The [durable processor](docs/INVOICE_PROCESSING.md) owns finite retries with exponential backoff/jitter, database-coordinated active-call limits and conservative token reservations; connection limits alone do not provide global concurrency or TPM enforcement.
 
 Verification uses `httpx.MockTransport`, not Azure or invoice uploads:
 
@@ -229,33 +230,7 @@ Verification uses `httpx.MockTransport`, not Azure or invoice uploads:
 PYTHONPATH="$PWD/backend:$PWD" backend/.venv/bin/python -m pytest backend/tests/test_azure_extraction*.py backend/tests/test_document_contracts.py backend/tests/test_evaluation_contracts.py backend/tests/test_evaluate_invoice_use_case.py
 ```
 
-This adapter is single-attempt. Upload, authentication, private storage and durable orchestration are separate implementation units.
-
-## Local demo sessions (backend service)
-
-The optional session router supports login, current-session inspection and CSRF-protected logout. Server-side accounts determine roles; Intake access is restricted to owned documents. This service is not wired into the default API yet. Sessions use opaque tokens, stored hashes and explicit expiry.
-
-After migrating, provision an account with an interactive password prompt:
-
-```sh
-PYTHONPATH=backend backend/.venv/bin/python -m app.interfaces.cli.provision_user --username intake-demo --role intake
-```
-
-For automation use `--password-env VARIABLE_NAME`, never a password argument. Roles are `intake`, `ap_analyst`, `ap_manager`; provisioning cannot overwrite an account. This local-demo service does not implement production throttling or account recovery.
-
-## Private document adapters
-
-`LocalDocumentValidator` checks real PDF/PNG/JPEG content, MIME/extension agreement and configurable size/page/pixel limits (defaults 8 MiB, 5 pages, 16 megapixels). Encrypted/malformed PDFs and truncated or excessive images are rejected before extraction. Validation establishes readable structure, not invoice authenticity.
-
-`LocalDocumentStorage` stores opaque keys below an explicit private POSIX root with 0700 directories and 0600 files. Uploaded names never become filesystem paths. Atomic publication rolls back on sync failures; invalid keys, traversal and links are rejected. Authorization remains the caller's responsibility; HTTP wiring is a later unit.
-
-## Durable processing repository
-
-Migration 0004 adds upload cases, attempts, state events and a global admission/token control row. Jobs preserve owner, opaque storage key, extraction evidence, lease fencing and next eligible execution time; existing raw invoice/evaluation contracts remain unchanged.
-
-The retry policy defaults to three total provider attempts. Local delay is `min(60, 2 * 2**(attempt - 1))` seconds with independent jitter from 0 to 50% of that backoff. Provider Retry-After or local token-window floors apply before jitter. A failed call retains its estimated token reservation; local token deferrals do not consume provider attempts. RETRY_WAIT persists across repository reconstruction.
-
-Short transactions coordinate bounded admission, concurrent claims and global reservations. A token-fenced completion callback commits evaluation and job linkage atomically, with no network permitted inside the callback. Runner/API wiring is a separate unit.
+This adapter remains single-attempt. The [integrated backend](docs/INVOICE_PROCESSING.md) supplies authentication, private storage and durable orchestration without changing deterministic matching rules.
 
 ## In-memory matching (no database or model)
 
@@ -375,7 +350,7 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 **Trade-off:** Explicit boundaries introduce additional interfaces, data conversions, and indirection compared with a conventional layered implementation. For a small application, that can increase navigation and implementation effort without an immediate payoff.
 
-**Scope and guardrail:** Retain a single monolith and introduce ports only at real integration boundaries. Do not create an interface for every class or add abstractions for hypothetical future replacements. The goal is isolated, testable business rules, not maximum abstraction. The directory boundaries now contain domain entities, the pure matching engine, application evaluation and persistence adapters; extraction, HTTP evaluation integration and human-review workflows remain future work.
+**Scope and guardrail:** Retain a single monolith and introduce ports only at real integration boundaries. Do not create an interface for every class or add abstractions for hypothetical future replacements. The goal is isolated, testable business rules, not maximum abstraction. The directory boundaries now contain domain entities, the pure matching engine, application evaluation and persistence adapters; extraction orchestration, HTTP evaluation integration and human-review workflows remain future work.
 
 ### D2 — Synchronous SQLAlchemy persistence and explicit Alembic migrations
 
@@ -469,4 +444,4 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 ## Current limitations
 
-This is local development infrastructure, not a production deployment: authentication, authorization, Azure OpenAI, uploads, matching API integration, and human-decision/audit-view workflows are intentionally absent. Container images favor a simple reproducible scaffold over optimized size; frontend build dependencies remain in the image. The official business answers are documented and their pure matching rules are implemented; operational workflows and the remaining undefined arithmetic/approval-limit policies are not silently supplied by the local scaffold.
+This is a local-demo backend, not a production deployment. Authenticated private uploads, durable extraction retries and deterministic evaluation integration are implemented; the Intake frontend, corrections, human decisions and audit views remain pending. PostgreSQL-backed integration tests passed, but the latest real Azure workflow remained in RETRY_WAIT with provider_unavailable, so full live end-to-end verification is still pending. Container images favor a simple reproducible scaffold over optimized size. The official business answers are implemented in pure matching rules; undefined arithmetic and approval-limit policies are not silently invented.
