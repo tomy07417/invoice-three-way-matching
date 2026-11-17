@@ -249,6 +249,14 @@ For automation use `--password-env VARIABLE_NAME`, never a password argument. Ro
 
 `LocalDocumentStorage` stores opaque keys below an explicit private POSIX root with 0700 directories and 0600 files. Uploaded names never become filesystem paths. Atomic publication rolls back on sync failures; invalid keys, traversal and links are rejected. Authorization remains the caller's responsibility; HTTP wiring is a later unit.
 
+## Durable processing repository
+
+Migration 0004 adds upload cases, attempts, state events and a global admission/token control row. Jobs preserve owner, opaque storage key, extraction evidence, lease fencing and next eligible execution time; existing raw invoice/evaluation contracts remain unchanged.
+
+The retry policy defaults to three total provider attempts. Local delay is `min(60, 2 * 2**(attempt - 1))` seconds with independent jitter from 0 to 50% of that backoff. Provider Retry-After or local token-window floors apply before jitter. A failed call retains its estimated token reservation; local token deferrals do not consume provider attempts. RETRY_WAIT persists across repository reconstruction.
+
+Short transactions coordinate bounded admission, concurrent claims and global reservations. A token-fenced completion callback commits evaluation and job linkage atomically, with no network permitted inside the callback. Runner/API wiring is a separate unit.
+
 ## In-memory matching (no database or model)
 
 The engine implements the confirmed pure rules from the supplied challenge and subsequent official client clarifications. It does **not** expose a matching API, execute payments, persist decisions or implement the human-review/audit workflows. Run this example from the repository root after installing backend dependencies:

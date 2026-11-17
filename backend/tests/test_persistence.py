@@ -8,7 +8,7 @@ from sqlalchemy import Date, Numeric, inspect, insert, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.infrastructure.persistence.connection import build_database_url, create_database_engine
-from app.infrastructure.persistence import auth_models  # Register demo-session metadata.
+from app.infrastructure.persistence import auth_models, processing_models  # Register new persistence metadata.
 from app.infrastructure.persistence.models import (
     Base, GoodsReceivedNoteLine, Invoice, InvoiceLine, InvoicePOReference,
     PurchaseOrderLine, Supplier,
@@ -58,7 +58,8 @@ def test_model_metadata_preserves_domain_shapes():
         "suppliers", "purchase_orders", "purchase_order_lines", "goods_received_notes",
         "goods_received_note_lines", "invoices", "invoice_lines", "invoice_po_references",
         "rule_configuration_versions", "approved_payment_quantities", "invoice_evaluations",
-        "evaluation_rule_findings", "users", "user_sessions",
+        "evaluation_rule_findings", "users", "user_sessions", "upload_cases",
+        "processing_control", "processing_attempts", "processing_events",
     }
     assert list(PurchaseOrderLine.__table__.primary_key.columns.keys()) == ["po_number", "line_number"]
     assert list(GoodsReceivedNoteLine.__table__.primary_key.columns.keys()) == ["grn_number", "po_line_number"]
