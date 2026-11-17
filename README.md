@@ -12,7 +12,7 @@ The three documents serve different purposes:
 | Purchase Order (PO) | What was ordered, from which supplier, and at what agreed price. |
 | Goods Received Note (GRN) | What was received; several GRNs can contribute to the received quantity of one PO line. |
 
-The intended workflow is to upload an invoice, extract structured fields with Azure OpenAI, retrieve the relevant reference data, and run deterministic Python checks. **The model extracts data; it does not decide payment outcomes.** Upload and extraction are not implemented yet. Structured invoices can now be evaluated and their evidence persisted through the application use case below; no evaluation HTTP endpoint is exposed.
+The intended workflow is to upload an invoice, extract structured fields with Azure OpenAI, retrieve the relevant reference data, and run deterministic Python checks. **The model extracts data; it does not decide payment outcomes.** A standalone Azure extraction adapter is implemented; upload and orchestration remain future work. Structured invoices can now be evaluated and their evidence persisted through the application use case below; no evaluation HTTP endpoint is exposed.
 
 The matching engine evaluates resolved input data with this precedence:
 
@@ -192,6 +192,44 @@ PY
 ```
 
 The printed IDs identify persisted records. Use `repository.transaction()` and `transaction.get_evaluation(id)` / `list_evaluations(invoice_id)` to retrieve historical evidence, rather than rerunning matching against today's context. A successful complete result can still be Held for Review or Rejected.
+
+## Extract a validated document (backend adapter only)
+
+`AzureOpenAIExtractor.extract(ValidatedDocument)` returns an `ExtractionResult`, not a payment outcome or a domain invoice ready for evaluation. Missing fields remain `None`; warnings and raw PO references are retained. Decimal values must be finite decimal strings, dates must be valid `YYYY-MM-DD`, and unexpected fields are rejected. Negative values are preserved without inventing credit-note policy. Non-invoices return `is_invoice=False` and `invoice=None`; malformed, truncated or inconsistent responses raise a safe `ExtractionError`.
+
+The backend-only API example below assumes `validated_document` was obtained from a trusted validator. **File validation and upload are not implemented by this adapter.** It reads already-exported variables, never loads `.env`, and must not run in the browser. The endpoint must be the exact supplied HTTPS Responses URL; the adapter does not append paths, change API versions or follow redirects. Set the backend-only `AZURE_OPENAI_DEPLOYMENT` to the assigned `TomasAmundarain-LIA3` deployment. Both constructors require an explicit deployment; the adapter sends it verbatim as `model`, with no inferred default or normalization. Empty, non-string or whitespace-containing deployment values are rejected before any request.
+
+```python
+import os
+from app.infrastructure.extraction.azure_openai import AzureOpenAIExtractor, AzureExtractionConfig
+
+# Create once at backend startup, reuse across extractions.
+extractor = AzureOpenAIExtractor.create(
+    endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_API_KEY"],
+    deployment=os.environ["AZURE_OPENAI_DEPLOYMENT"],
+    config=AzureExtractionConfig(max_connections=1, max_output_tokens=3000),
+)
+try:
+    result = await extractor.extract(validated_document)
+    # Retain uncertainty; establish mandatory evidence before domain evaluation.
+finally:
+    await extractor.aclose()  # application shutdown, not after every document
+```
+
+To borrow an existing reusable `httpx.AsyncClient`, pass it as the first constructor argument with `endpoint`, `api_key`, `deployment` and optional `config`. Its owner configures bounded connection limits and must disable transport retries, credential-forwarding hooks and unsafe logging. `extractor.aclose()` never closes a borrowed client. The owned-client factory disables environment proxy configuration, transport retries and redirects; it uses configurable bounded connection/keepalive limits. Both forms enforce connect/read/write/pool and total-request timeouts, and propagate cancellation.
+
+PDFs are sent directly as base64 `input_file`; PNG/JPEG use base64 `input_image`. Requests use `store:false`, low reasoning effort and strict `text.format` JSON schema with all keys required and unknown values nullable. The model is instructed to extract only, never approve or reject payment. Provider error bodies, transport exception chains, filenames and credentials are not included in adapter errors or logs (the adapter does not log). Successful extracted text/warnings remain private document data, not safe log messages.
+
+**Retry and throughput boundary:** each `extract` call makes one HTTP request, without retry sleeps. HTTP 429, 5xx, network failures/timeouts and malformed responses are retryable attempt failures; 401/403 and other non-200 responses (including redirects/400) are terminal. Valid `Retry-After` seconds or HTTP dates are returned as a delay, not slept inside the adapter. Unknown token consumption after failure is not zero. Successful responses require valid, consistent token counters. A future durable processor must enforce finite retries with backoff/jitter, active-call limits and the 10,000-token/minute budget; connection limits alone do not provide global concurrency or TPM enforcement.
+
+Verification uses `httpx.MockTransport`, not Azure or invoice uploads:
+
+```sh
+PYTHONPATH="$PWD/backend:$PWD" backend/.venv/bin/python -m pytest backend/tests/test_azure_extraction*.py backend/tests/test_document_contracts.py backend/tests/test_evaluation_contracts.py backend/tests/test_evaluate_invoice_use_case.py
+```
+
+This adapter is single-attempt. Upload, authentication, private storage and durable orchestration are separate implementation units.
 
 ## In-memory matching (no database or model)
 
@@ -396,6 +434,12 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 **Decision:** Add one evaluation transaction port, immutable command/configuration/record DTOs and a PostgreSQL adapter around the unchanged domain engine. Reuse the session-bound reference repository and existing raw invoice tables, with a new `0002` migration rather than rewriting `0001`. Select effective configuration and retain full input/context, ordered findings and actor/time evidence for every invocation.
 
 **Rationale/trade-off:** REPEATABLE READ keeps multiple context queries coherent and registration/results atomic, but serialization failures may require an explicit caller retry; no automatic retries or concurrent approval protection are provided. Existing `invoice_id` requires identical raw input, enabling self-history exclusion without implementing correction/version workflows. The owner confirmed an initially empty authoritative approved-quantity ledger. Technical state is never approval, and append-only application history is not an admin-proof audit log. No new dependencies or evaluation endpoint are introduced.
+
+### D15 — Strict single-attempt Azure extraction
+
+**Decision:** Use approved httpx with a reusable async client and direct base64 PDF/image input, strict nullable extraction schema and exact Decimal/date conversion into existing draft DTOs. The adapter sends `store:false` to the exact configured URL with the assigned deployment supplied explicitly from backend environment configuration; no executable model default is hardcoded. Prior limited synthetic connectivity/PDF probes informed direct PDF support; this slice adds simulated contract tests, not new live proof.
+
+**Boundary/trade-off:** Retry scheduling belongs to the future durable processor, preserving one request per attempt and unknown token usage on failure. Safe error codes and optional `Retry-After` delays support that processor without retaining provider exception chains. Transport limits and timeouts bound resources, but do not implement durable admission, global concurrency, token reservations or retries. Incomplete evidence is not an automatic payment decision.
 
 ## Current limitations
 
