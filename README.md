@@ -243,6 +243,12 @@ PYTHONPATH=backend backend/.venv/bin/python -m app.interfaces.cli.provision_user
 
 For automation use `--password-env VARIABLE_NAME`, never a password argument. Roles are `intake`, `ap_analyst`, `ap_manager`; provisioning cannot overwrite an account. This local-demo service does not implement production throttling or account recovery.
 
+## Private document adapters
+
+`LocalDocumentValidator` checks real PDF/PNG/JPEG content, MIME/extension agreement and configurable size/page/pixel limits (defaults 8 MiB, 5 pages, 16 megapixels). Encrypted/malformed PDFs and truncated or excessive images are rejected before extraction. Validation establishes readable structure, not invoice authenticity.
+
+`LocalDocumentStorage` stores opaque keys below an explicit private POSIX root with 0700 directories and 0600 files. Uploaded names never become filesystem paths. Atomic publication rolls back on sync failures; invalid keys, traversal and links are rejected. Authorization remains the caller's responsibility; HTTP wiring is a later unit.
+
 ## In-memory matching (no database or model)
 
 The engine implements the confirmed pure rules from the supplied challenge and subsequent official client clarifications. It does **not** expose a matching API, execute payments, persist decisions or implement the human-review/audit workflows. Run this example from the repository root after installing backend dependencies:
