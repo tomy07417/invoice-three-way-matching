@@ -71,6 +71,16 @@ test('AP responses preserve additive association provenance without breaking ver
     assert.deepEqual(await call(), value);
   }
 });
+test('accounting evidence roundtrips while malformed adjustment amounts are rejected', async t => {
+  const { api, ApiError } = await loadTypeScript('../lib/api.ts');
+  const value = clone(review);
+  value.extraction.accounting_evidence = { taxes_separately_stated: true, adjustments: [
+    { kind: 'discount', stage: 'before_subtotal', amount: '-10.00', line_index: 0 }] };
+  t.mock.method(globalThis, 'fetch', async () => Response.json(value));
+  assert.deepEqual((await api.reviewDetail(id)).extraction.accounting_evidence, value.extraction.accounting_evidence);
+  value.extraction.accounting_evidence.adjustments[0].amount = 10;
+  await assert.rejects(api.reviewDetail(id), error => error instanceof ApiError && error.code === 'invalid_response');
+});
 const invalidCases = [
   ['currentSession', 'unknown role', v => { v.actor.role = 'admin'; }],
   ['login', 'nested actor type', v => { v.actor.actor_id = '1'; }],

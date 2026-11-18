@@ -21,7 +21,7 @@ export function DraftEditor({ initial, busy, onSave, onCancel, onDirty }: {
     try {
       const values = new FormData(form.current);
       requiredReviewComment(String(values.get('comment') ?? ''));
-      const draft = draftFromForm(values, rows.length);
+      const draft = draftFromForm(values, rows.length, initial, rows.map(row => row.key));
       if (!correctionChanges(initial, draft).length) throw new Error('Change invoice data before saving a correction.');
       setPreview(draft); setError(null);
     } catch (failure) { setError(reviewError(failure)); }
@@ -31,7 +31,7 @@ export function DraftEditor({ initial, busy, onSave, onCancel, onDirty }: {
     if (!preview || busy) return;
     try {
       const values = new FormData(event.currentTarget);
-      onSave(draftFromForm(values, rows.length), requiredReviewComment(String(values.get('comment') ?? '')));
+      onSave(draftFromForm(values, rows.length, initial, rows.map(row => row.key)), requiredReviewComment(String(values.get('comment') ?? '')));
     } catch (failure) { setError(reviewError(failure)); }
   }
   const changes = preview ? correctionChanges(initial, preview) : [];

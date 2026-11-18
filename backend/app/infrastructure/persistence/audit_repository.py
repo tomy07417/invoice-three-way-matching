@@ -28,6 +28,8 @@ def _draft(value):
     if not isinstance(value, dict):
         return None
     result = {item.name: deepcopy(value.get(item.name)) for item in fields(InvoiceDraft) if item.name != 'lines'}
+    if value.get('accounting_evidence') is None:
+        result.pop('accounting_evidence', None)
     result['lines'] = [{item.name: deepcopy(line.get(item.name)) for item in fields(InvoiceLineDraft)}
                        for line in value.get('lines', [])]
     return result

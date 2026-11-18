@@ -35,6 +35,18 @@ test('correction forms preserve exact strings, explicit associations and nullabl
   assert.deepEqual(state.draftFromForm(data, 1).po_references, []);
 });
 
+test('correction preserves accounting evidence but invalidates it after line reindexing', () => {
+  const original = state.draftFromForm(form(), 1);
+  original.accounting_evidence = { taxes_separately_stated: true, adjustments: [
+    { kind: 'discount', stage: 'before_subtotal', amount: '-10.00', line_index: 0 }] };
+  const preserved = state.draftFromForm(form(), 1, original, [0]);
+  assert.deepEqual(preserved.accounting_evidence, original.accounting_evidence);
+  preserved.accounting_evidence.adjustments[0].amount = '99';
+  assert.equal(original.accounting_evidence.adjustments[0].amount, '-10.00');
+  assert.equal(state.draftFromForm(form(), 1, original, [1]).accounting_evidence, null);
+  assert.equal(state.draftFromForm(form(), 0, original, []).accounting_evidence, null);
+});
+
 test('invalid correction input and comments fail without coercing prices or line identities', () => {
   for (const invalid of ['NaN', 'Infinity', '2,00', 'abc']) {
     const data = form(); data.set('total_amount', invalid);

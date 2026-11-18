@@ -6,6 +6,7 @@ from enum import Enum
 from uuid import UUID
 
 from app.application.dtos.invoice_documents import InvoiceDraft, InvoiceLineDraft
+from app.application.dtos.accounting import parse_accounting_evidence
 
 
 class ReviewError(ValueError):
@@ -18,7 +19,8 @@ def review_value(value):
     if is_dataclass(value):
         value = asdict(value)
     if isinstance(value, dict):
-        return {key: review_value(item) for key, item in value.items()}
+        return {key: review_value(item) for key, item in value.items()
+                if not (key == 'accounting_evidence' and item is None)}
     if isinstance(value, (tuple, list)):
         return [review_value(item) for item in value]
     if isinstance(value, (Decimal, UUID)):
@@ -36,7 +38,9 @@ def parse_review_draft(value: dict) -> InvoiceDraft:
         raise ReviewError('invalid_correction', 'Provide a valid complete extraction with exact decimal strings', 422)
 
     def shape(data, cls):
-        if not isinstance(data, dict) or set(data) != {item.name for item in fields(cls)}:
+        optional = {'accounting_evidence'} if cls is InvoiceDraft else set()
+        expected = {item.name for item in fields(cls)}
+        if not isinstance(data, dict) or not expected - optional <= set(data) <= expected:
             invalid()
         return dict(data)
 
@@ -98,4 +102,8 @@ def parse_review_draft(value: dict) -> InvoiceDraft:
             invalid()
         lines.append(InvoiceLineDraft(**line))
     data['lines'] = tuple(lines)
+    try:
+        data['accounting_evidence'] = parse_accounting_evidence(data.get('accounting_evidence'), decimal)
+    except (ValueError, InvalidOperation):
+        invalid()
     return InvoiceDraft(**data)

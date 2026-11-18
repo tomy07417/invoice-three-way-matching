@@ -8,6 +8,7 @@ from datetime import date
 from decimal import Decimal
 from hashlib import sha256
 from typing import Literal
+from app.domain.matching.price_basis import AccountingEvidence
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ class InvoiceDraft:
     tax_amount: Decimal | None
     total_amount: Decimal | None
     lines: tuple[InvoiceLineDraft, ...]
+    accounting_evidence: AccountingEvidence | None = None
 
 
 @dataclass(frozen=True)

@@ -13,7 +13,7 @@ import { MoneyValue } from '../../../components/shared/format-value';
 import { OriginalDocument, TableRegion } from '../../../components/shared/workspace';
 
 const activeDetail = (invoice: InvoiceDetail) => isActive(invoice.processing_status);
-const HEADERS: [keyof Omit<InvoiceDraft, 'lines' | 'po_references'>, string][] = [
+const HEADERS: [keyof Omit<InvoiceDraft, 'lines' | 'po_references' | 'accounting_evidence'>, string][] = [
   ['supplier_name', 'Supplier name'], ['supplier_tax_id', 'Supplier tax ID'], ['invoice_number', 'Invoice number'],
   ['invoice_date', 'Invoice date'], ['due_date', 'Due date'], ['currency', 'Currency'], ['subtotal', 'Subtotal'],
   ['tax_amount', 'Tax amount'], ['total_amount', 'Total amount'],

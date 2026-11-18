@@ -38,6 +38,12 @@ export interface InvoiceLine {
   po_line_number: number | null;
   unit_price_basis: 'net' | 'gross' | 'unknown';
 }
+export interface AccountingEvidence {
+  taxes_separately_stated: boolean | null;
+  adjustments: { kind: 'discount' | 'charge' | 'rounding' | 'unknown';
+    stage: 'before_subtotal' | 'after_subtotal' | 'unknown';
+    amount: DecimalString | null; line_index: number | null }[] | null;
+}
 export interface InvoiceDraft {
   supplier_name: string | null;
   supplier_tax_id: string | null;
@@ -50,6 +56,7 @@ export interface InvoiceDraft {
   tax_amount: DecimalString | null;
   total_amount: DecimalString | null;
   lines: InvoiceLine[];
+  accounting_evidence?: AccountingEvidence | null;
 }
 export interface Finding {
   code: string;

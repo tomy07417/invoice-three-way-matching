@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.application.dtos.auth import Role
+from app.application.dtos.accounting import parse_accounting_evidence
 from app.application.dtos.invoice_documents import (
     DocumentMetadata, ExtractionResult, InvoiceDraft, InvoiceLineDraft, TokenUsage,
 )
@@ -40,7 +41,10 @@ def _json_result(result):
         if isinstance(value, (Decimal, date)):
             return str(value)
         raise TypeError('Unsupported extraction value')
-    return json.loads(json.dumps(asdict(result), default=encode, allow_nan=False))
+    value = asdict(result)
+    if value['invoice'] is not None and value['invoice'].get('accounting_evidence') is None:
+        value['invoice'].pop('accounting_evidence', None)
+    return json.loads(json.dumps(value, default=encode, allow_nan=False))
 
 
 def _restore(value):
@@ -62,6 +66,7 @@ def _restore(value):
                 line[key] = Decimal(line[key]) if line[key] is not None else None
             lines.append(InvoiceLineDraft(**line))
         invoice['lines'] = tuple(lines)
+        invoice['accounting_evidence'] = parse_accounting_evidence(invoice.get('accounting_evidence'))
         invoice = InvoiceDraft(**invoice)
     usage = TokenUsage(**value['usage']) if value['usage'] is not None else None
     return ExtractionResult(value['is_invoice'], invoice, tuple(value['warnings']), usage, value['response_id'])

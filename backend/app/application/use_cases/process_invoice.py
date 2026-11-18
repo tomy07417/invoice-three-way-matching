@@ -66,6 +66,7 @@ def evaluate_draft(transaction, job, clock, *, origin='document-extraction'):
                ('description', 'quantity', 'unit_price', 'line_total')) for line in draft.lines):
         return None, None, False
     values = asdict(draft)
+    values.pop('accounting_evidence', None)
     values['lines'] = tuple(InvoiceLine(line.description, line.quantity, line.unit_price,
                                        line.line_total, line.po_line_reference) for line in draft.lines)
     invoice = Invoice(**values)

@@ -80,11 +80,19 @@ const invoiceLine: ResponseGuard = value => record(value) && nullableString(valu
   && nullableDecimal(value.quantity) && nullableDecimal(value.unit_price) && nullableDecimal(value.line_total)
   && nullableString(value.po_line_reference) && nullableString(value.po_number) && nullableInteger(value.po_line_number)
   && typeof value.unit_price_basis === 'string' && ['net', 'gross', 'unknown'].includes(value.unit_price_basis);
+const accountingEvidence: ResponseGuard = value => value === null || record(value)
+  && (value.taxes_separately_stated === null || typeof value.taxes_separately_stated === 'boolean')
+  && (value.adjustments === null || Array.isArray(value.adjustments) && value.adjustments.length <= 500
+    && value.adjustments.every(item => record(item) && typeof item.kind === 'string'
+      && ['discount', 'charge', 'rounding', 'unknown'].includes(item.kind)
+      && typeof item.stage === 'string' && ['before_subtotal', 'after_subtotal', 'unknown'].includes(item.stage)
+      && nullableDecimal(item.amount) && nullableInteger(item.line_index)));
 const invoiceDraft: ResponseGuard = value => record(value) && nullableString(value.supplier_name)
   && nullableString(value.supplier_tax_id) && nullableString(value.invoice_number) && nullableString(value.invoice_date)
   && nullableString(value.due_date) && (value.po_references === null || strings(value.po_references))
   && nullableString(value.currency) && nullableDecimal(value.subtotal) && nullableDecimal(value.tax_amount)
-  && nullableDecimal(value.total_amount) && Array.isArray(value.lines) && value.lines.every(invoiceLine);
+  && nullableDecimal(value.total_amount) && Array.isArray(value.lines) && value.lines.every(invoiceLine)
+  && (value.accounting_evidence === undefined || accountingEvidence(value.accounting_evidence));
 const finding: ResponseGuard = value => record(value) && typeof value.code === 'string' && ruleOutcome(value.outcome)
   && typeof value.reason === 'string' && (value.po_number === undefined || nullableString(value.po_number))
   && (value.line_index === undefined || nullableInteger(value.line_index))

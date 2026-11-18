@@ -33,7 +33,8 @@ export function reviewError(error: unknown): string {
   return failure?.message ?? 'The service could not be reached. Refresh the case before retrying an uncertain decision.';
 }
 
-export function draftFromForm(form: FormData, lineCount: number): InvoiceDraft {
+export function draftFromForm(form: FormData, lineCount: number, original?: InvoiceDraft | null,
+  lineKeys?: number[]): InvoiceDraft {
   function value(name: string, field: string): string | null {
     const raw = String(form.get(name) ?? '').trim();
     if (!raw) return null;
@@ -56,7 +57,13 @@ export function draftFromForm(form: FormData, lineCount: number): InvoiceDraft {
     if (!['net', 'gross', 'unknown'].includes(line.unit_price_basis ?? '')) throw new Error('Choose a valid price basis.');
     lines.push({ ...line, po_line_number: rawNumber === null ? null : Number(rawNumber) } as InvoiceLine);
   }
-  return { ...header, po_references: form.has('po_references_unknown') ? null : poReferences, lines } as InvoiceDraft;
+  const draft = { ...header, po_references: form.has('po_references_unknown') ? null : poReferences, lines } as InvoiceDraft;
+  if (original?.accounting_evidence !== undefined) {
+    // Stored line-scoped facts cannot silently move to another line after removal/addition.
+    const sameLines = lineCount === original.lines.length && (!lineKeys || lineKeys.every((key, index) => key === index));
+    draft.accounting_evidence = sameLines ? structuredClone(original.accounting_evidence) : null;
+  }
+  return draft;
 }
 
 export interface CorrectionChange { field: string; before: string; after: string }

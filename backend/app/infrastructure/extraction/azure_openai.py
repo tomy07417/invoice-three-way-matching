@@ -60,7 +60,16 @@ Use the visible document's consistent number formatting, not currency or supplie
 Examples: 980.10 -> "980.10"; 1,500.40 -> "1500.40"; 1,831.94 -> "1831.94"; 1.500,40 -> "1500.40".
 Remove grouping separators only; never change the magnitude, round or truncate decimal values.
 In particular, 1,831.94 must not become "1.83194".
-If separators remain ambiguous, return null for that field and a warning; do not guess or calculate missing totals."""
+If separators remain ambiguous, return null for that field and a warning; do not guess or calculate missing totals.
+
+Extract accounting_evidence from visible facts only. No arithmetic inference of unit_price_basis:
+leave it unknown unless explicitly stated. taxes_separately_stated is true only for visibly separate tax,
+false for visibly included tax, otherwise null. adjustments=[] only when the readable invoice shows no
+additional discounts, charges or rounding; use null if incomplete or uncertain. Capture every visible
+adjustment with its original decimal amount/sign, kind, and stage: before_subtotal if already included
+in the displayed subtotal, after_subtotal if applied between subtotal and total, unknown if ambiguous.
+line_index is zero-based only for an explicitly line-specific before_subtotal adjustment; otherwise null.
+Never invent balancing adjustments, calculate missing values or decide net basis/payment outcomes."""
 
 
 def _retry_after(value):

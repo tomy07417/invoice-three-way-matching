@@ -5,6 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.application.dtos.invoice_documents import InvoiceDraft, InvoiceLineDraft
+from app.application.dtos.accounting import parse_accounting_evidence
 
 
 def object_schema(properties):
@@ -24,12 +25,22 @@ LINE_SCHEMA = object_schema({
     "po_line_number": nullable({"type": "integer"}),
     "unit_price_basis": {"type": "string", "enum": ["net", "gross", "unknown"]},
 })
+ADJUSTMENT_SCHEMA = object_schema({
+    'kind': {'type': 'string', 'enum': ['discount', 'charge', 'rounding', 'unknown']},
+    'stage': {'type': 'string', 'enum': ['before_subtotal', 'after_subtotal', 'unknown']},
+    'amount': NUMBER, 'line_index': nullable({'type': 'integer'}),
+})
+ACCOUNTING_SCHEMA = nullable(object_schema({
+    'taxes_separately_stated': nullable({'type': 'boolean'}),
+    'adjustments': nullable({'type': 'array', 'items': ADJUSTMENT_SCHEMA}),
+}))
 INVOICE_SCHEMA = object_schema({
     "supplier_name": TEXT, "supplier_tax_id": TEXT, "invoice_number": TEXT,
     "invoice_date": DATE, "due_date": DATE,
     "po_references": nullable({"type": "array", "items": {"type": "string"}}),
     "currency": TEXT, "subtotal": NUMBER, "tax_amount": NUMBER, "total_amount": NUMBER,
     "lines": {"type": "array", "items": LINE_SCHEMA},
+    'accounting_evidence': ACCOUNTING_SCHEMA,
 })
 EXTRACTION_SCHEMA = object_schema({
     "is_invoice": {"type": "boolean"}, "invoice": nullable(INVOICE_SCHEMA),
@@ -86,6 +97,10 @@ def _validate(value, schema):
 
 def parse_extraction(text):
     data = load_json(text)
+    # Accept the original contract on historical/mock responses. Absence is
+    # unknown, never an empty adjustment list or permission to infer.
+    if isinstance(data, dict) and isinstance(data.get('invoice'), dict):
+        data['invoice'].setdefault('accounting_evidence', None)
     _validate(data, EXTRACTION_SCHEMA)
     if data["is_invoice"] != (data["invoice"] is not None):
         raise ValueError("Inconsistent invoice classification")
@@ -108,4 +123,5 @@ def parse_extraction(text):
                 line[key] = Decimal(line[key])
         lines.append(InvoiceLineDraft(**line))
     fields["lines"] = tuple(lines)
+    fields['accounting_evidence'] = parse_accounting_evidence(fields['accounting_evidence'])
     return True, InvoiceDraft(**fields), tuple(data["warnings"])
