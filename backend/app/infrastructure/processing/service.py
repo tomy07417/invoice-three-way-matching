@@ -91,8 +91,28 @@ class InvoiceService:
         actor = await self._actor(token)
         jobs = await self.offload(self.repository.list, actor)
         selected = [job for job in jobs if status is None or job.state == status]
-        return dict(items=[self.snapshot(job) for job in selected[offset:offset + limit]],
-                    total=len(selected), offset=offset, limit=limit)
+        page = selected[offset:offset + limit]
+
+        def project():
+            items = []
+            for job in page:
+                data = self.snapshot(job)
+                draft = job.extraction.invoice if job.extraction else None
+                for field in ('invoice_number', 'supplier_name', 'invoice_date', 'total_amount', 'currency'):
+                    data[field] = public_value(getattr(draft, field)) if draft is not None else None
+                items.append(data)
+            # Read only the authorized, selected page's persisted final outcomes.
+            # Incomplete evaluations retain null; provisional decisions are not outcomes.
+            if any(job.evaluation_id is not None for job in page):
+                with SqlAlchemyInvoiceEvaluationRepository(self.repository.engine).transaction() as tx:
+                    for job, data in zip(page, items):
+                        if job.evaluation_id is not None:
+                            record = tx.get_evaluation(job.evaluation_id)
+                            if record is not None:
+                                data['automatic_outcome'] = public_value(record.result.final_status)
+            return items
+
+        return dict(items=await self.offload(project), total=len(selected), offset=offset, limit=limit)
 
     async def detail(self, token, invoice_id):
         job = await self._job(await self._actor(token), invoice_id)
