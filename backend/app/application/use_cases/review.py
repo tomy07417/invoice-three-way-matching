@@ -10,7 +10,7 @@ from app.application.dtos.review import ReviewError, parse_review_draft, review_
 from app.application.dtos.review_comparison import comparison_rows
 from app.application.ports.auth import AuthError
 from app.application.ports.review import ReviewRepository
-from app.application.use_cases.process_invoice import evaluate_draft
+from app.application.use_cases.process_invoice import evaluate_draft, resolve_draft_associations
 from app.domain.matching.duplicates import normalize_invoice_number
 from app.domain.matching.types import LineAssociation
 from app.domain.review import PolicyError, approval_eligibility, authorize_decision, normalize_comment
@@ -169,15 +169,15 @@ class ReviewService:
                for supplier, previous in tx.active_approved_invoices()):
             raise ReviewError('already_authorized', 'This supplier and invoice number already have an active payment authorization')
         purchase_orders = {po.po_number: po for po in reference.purchase_orders}
+        resolved = resolve_draft_associations(draft, reference.purchase_orders)
         grouped = defaultdict(Decimal)
-        for line in draft.lines:
-            po = purchase_orders.get(line.po_number)
-            if (po is None or line.po_number not in (draft.po_references or ())
-                    or not any(item.line_number == line.po_line_number for item in po.lines)
-                    or line.quantity is None or not line.quantity.is_finite() or line.quantity <= 0
+        for index, line in enumerate(draft.lines):
+            association = resolved.get(index)
+            if (association is None or line.quantity is None
+                    or not line.quantity.is_finite() or line.quantity <= 0
                     or line.unit_price_basis != 'net' or line.unit_price is None or line.unit_price <= 0):
                 raise ReviewError('unresolved_line', 'Every line needs a reliable PO link and positive quantity/net price before approval')
-            grouped[LineAssociation(line.po_number, line.po_line_number)] += line.quantity
+            grouped[association.target] += line.quantity
         if not grouped:
             raise ReviewError('incomplete_evidence', 'At least one fully associated invoice line is required')
         approved = evaluation.get_approved_quantities(tuple(purchase_orders))

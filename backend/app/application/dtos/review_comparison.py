@@ -79,14 +79,18 @@ def comparison_rows(
     rule/message/evidence dictionaries; code-only explanations are rejected.
     Global findings apply to every row; scoped findings keep their stored scope.
 
-    Explicit targets are retained even if unavailable, but only referenced,
-    present PO-local targets have explicit association status. No allocation,
+    Caller-supplied targets are retained even if unavailable. The legacy
+    'explicit' status means a verified snapshot target, not that the model
+    extracted a line ID. Optional association_method records the actual source;
+    its absence in old snapshots never invents provenance. No allocation,
     approval, price comparison, currency conversion, or live query occurs here.
     Shared targets show the same evaluation-time balance on each invoice row;
     that balance is NOT a claim about current availability for a human approval.
     """
     invoice = input_snapshot.get("invoice") or {}
     links = {item["line_index"]: item for item in input_snapshot.get("associations") or []}
+    methods = {item["line_index"]: item["method"]
+               for item in input_snapshot.get("association_methods") or []}
     prices = {item["line_index"]: item.get("net_unit_price")
               for item in input_snapshot.get("net_unit_prices") or []}
     orders = {item["po_number"]: item for item in context_snapshot.get("purchase_orders") or []}
@@ -120,7 +124,7 @@ def comparison_rows(
             if received is not None and previous is not None:
                 # copy_negate is exact even under a small ambient Decimal context.
                 available = _sum([received, str(Decimal(previous).copy_negate())])
-        rows.append({
+        row = {
             "line_index": index,
             "description": line.get("description"),
             "quantity_invoiced": _text(line.get("quantity")),
@@ -140,5 +144,8 @@ def comparison_rows(
                 {"rule": item["rule"], "message": item["message"], "evidence": dict(item["evidence"])}
                 for item in normalized_findings if _applies(item, index, po_number, po_line_number)
             ],
-        })
+        }
+        if reliable and methods.get(index) in ('explicit', 'description'):
+            row['association_method'] = methods[index]
+        rows.append(row)
     return rows

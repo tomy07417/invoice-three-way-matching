@@ -198,6 +198,8 @@ The printed IDs identify persisted records. Use `repository.transaction()` and `
 
 `AzureOpenAIExtractor.extract(ValidatedDocument)` returns an `ExtractionResult`, not a payment outcome or a domain invoice ready for evaluation. Missing fields remain `None`; warnings and raw PO references are retained. Decimal values must be finite decimal strings, dates must be valid `YYYY-MM-DD`, and unexpected fields are rejected. Negative values are preserved without inventing credit-note policy. Non-invoices return `is_invoice=False` and `invoice=None`; malformed, truncated or inconsistent responses raise a safe `ExtractionError`.
 
+The instruction explicitly distinguishes thousands/grouping separators from the decimal separator using the document's consistent formatting, not its currency or supplier location: `1,500.40` and `1.500,40` must both become `"1500.40"`, while `1,831.94` becomes `"1831.94"`, never `"1.83194"`. Ambiguous formatting must produce a null field and warning, not a guess. This is model guidance, not proof that a live extraction is correct; it neither repairs stored invoices nor changes the strict parser, precision, price-basis policy or deterministic matching.
+
 The backend-only API example below assumes `validated_document` was obtained from a trusted validator. **File validation and upload are not implemented by this adapter.** It reads already-exported variables, never loads `.env`, and must not run in the browser. The endpoint must be the exact supplied HTTPS Responses URL; the adapter does not append paths, change API versions or follow redirects. Set the backend-only `AZURE_OPENAI_DEPLOYMENT` to the assigned `TomasAmundarain-LIA3` deployment. Both constructors require an explicit deployment; the adapter sends it verbatim as `model`, with no inferred default or normalization. Empty, non-string or whitespace-containing deployment values are rejected before any request.
 
 ```python
@@ -341,6 +343,8 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 ## AP review workspace (PRD03)
 
 AP Analyst and Manager accounts can open **AP review** in the navigation or visit `/review`. Intake accounts cannot access this workspace or its backend API. The queue defaults to Held for Review; choose **All outcomes / incomplete cases** to find a case after its automatic result changes. Filters cover supplier, invoice date, exact amount, reason, operational state and age, with sorting and pagination.
+
+Initial processing and AP reevaluation now resolve a line against referenced PO lines using a valid explicit identity first, otherwise a unique exact description after case/whitespace normalization. Codes, numbers and punctuation are retained; no price/quantity filtering, fuzzy matching or arbitrary first-candidate selection occurs. Partial structured references remain unresolved even when raw text could fill the missing half. Approval repeats the same resolution against fresh reference data before checking summed receipts minus active approved consumption. Extracted PO fields are never rewritten, and unknown net price basis remains pending, not Auto-Pay.
 
 The detail pairs the private original with original/current extracted headers and evaluation-time PO/GRN evidence. **Correct extraction** opens nullable header/line fields and explicit PO-local associations. Decimal inputs remain strings; blank fields mean unknown, while an empty known PO list means none. Enter a reason, preview changed fields, then confirm the correction. This revokes existing authorization with audit; enter a new comment and select **Reevaluate** before making a new decision. Reevaluation also supersedes the current decision and never calls Azure.
 
@@ -638,6 +642,12 @@ Decisions D1–D15 record earlier implementation milestones. References to defer
 ### D20 — Explicit numeric-separator extraction guidance
 
 **Owner request:** Clarify the model instruction after an original `1,831.94` total was persisted as `1.83194`. Request dot-decimal strings without grouping separators, include both separator conventions and unchanged sub-thousand examples, preserve magnitude and precision, and retain null/warning for ambiguity. Do not calculate missing totals or infer net price basis. This prompt-only clarification applies to future extractions after the updated backend is running; historical extraction/evaluation evidence remains unchanged. MockTransport checks verify the instruction sent and exact returned values, not live model compliance.
+
+### D21 — Conservative invoice-line identity resolution
+
+**Owner request:** Correct the explicit-only association gap. A pure Domain resolver accepts complete structured references, unambiguous raw line numbers or exact `PO-number/line-number` references, and otherwise a unique normalized exact description within the referenced POs. Invalid, partial, contradictory or ambiguous references are not rescued by descriptions. Shared targets retain the existing grouped-quantity checks. Processing, reevaluation and the fresh approval guard reuse this resolver; the low-level structured evaluation API still consumes caller-supplied associations.
+
+**Evidence compatibility:** New evaluation inputs optionally record `association_methods`; comparative rows expose the recorded `association_method` (`explicit` or `description`). The legacy `association_status: explicit` flag still means a verified target in the supplied snapshot, not necessarily an ID extracted by the model. This preserves existing client validation and approval presentation. Old snapshots get no invented method, and no extraction/evaluation/history migration occurs. Unknown net basis or other missing evidence still prevents a final Auto-Pay result. Deploying the updated backend and explicit human reevaluation are separate from these isolated source tests; existing acceptance records remain unchanged.
 
 ## Current limitations
 

@@ -18,6 +18,7 @@ class EvaluateInvoiceCommand:
     associations: Mapping[int, LineAssociation | None] | None = None
     net_unit_prices: Mapping[int, Decimal] | None = None
     origin: str = "structured-input"
+    association_methods: Mapping[int, str] | None = None
 
     def __post_init__(self) -> None:
         for value in (self.actor_id, self.origin):
@@ -27,7 +28,7 @@ class EvaluateInvoiceCommand:
             raise ValueError("Existing invoice ID must be a positive integer")
         if self.supplier_id is not None and (not isinstance(self.supplier_id, str) or not self.supplier_id.strip()):
             raise ValueError("Supplier ID must be nonempty when supplied")
-        for name in ("associations", "net_unit_prices"):
+        for name in ("associations", "net_unit_prices", "association_methods"):
             value = getattr(self, name)
             if value is not None:
                 object.__setattr__(self, name, MappingProxyType(dict(value)))

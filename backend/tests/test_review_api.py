@@ -45,13 +45,22 @@ def review(migrated_engine):
         app = create_app(invoice_service=service)
         with TestClient(app) as client:
             csrf = login(client)
-            def seed(number='AP-1', quantity='2', total='24', currency='USD'):
+            def seed(number='AP-1', quantity='2', total='24', currency='USD', *, explicit=True, basis='net',
+                     draft=None, document=None):
                 # Price discrepancy produces a complete Held for Review without excess receipts.
-                draft = InvoiceDraft('Supplier', 'tax', number, date(2026, 10, 2), None, ('PO-1',), currency,
-                                     Decimal(total), Decimal('0'), Decimal(total),
-                                     (InvoiceLineDraft('Item', Decimal(quantity), Decimal('12'), Decimal(total),
-                                                       '3', 'PO-1', 3, 'net'),))
-                admitted = upload(client, csrf, number)
+                if draft is None:
+                    draft = InvoiceDraft('Supplier', 'tax', number, date(2026, 10, 2), None, ('PO-1',), currency,
+                                         Decimal(total), Decimal('0'), Decimal(total),
+                                         (InvoiceLineDraft('Item', Decimal(quantity), Decimal('12'), Decimal(total),
+                                                           '3' if explicit else None, 'PO-1' if explicit else None,
+                                                           3 if explicit else None, basis),))
+                if document is None:
+                    admitted = upload(client, csrf, number)
+                else:
+                    response = client.post('/invoices', files={'file': document},
+                                           headers={'X-CSRF-Token': csrf, 'Idempotency-Key': number})
+                    assert response.status_code == 202
+                    admitted = response.json()
                 process(repo, storage, now, ExtractionResult(True, draft, (), TokenUsage(1, 1)))
                 return admitted['invoice_id']
             yield client, app, seed

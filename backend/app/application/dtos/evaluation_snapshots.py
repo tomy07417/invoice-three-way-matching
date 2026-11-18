@@ -48,12 +48,18 @@ def snapshot_input(command: EvaluateInvoiceCommand) -> dict:
             {"line_index": index, "net_unit_price": _json_value(price)}
             for index, price in sorted(command.net_unit_prices.items())
         ]
-    return {
+    snapshot = {
         "invoice": invoice,
         "requested_supplier_id": command.supplier_id,
         "associations": associations,
         "net_unit_prices": prices,
     }
+    if command.association_methods is not None:
+        snapshot["association_methods"] = [
+            {"line_index": index, "method": method}
+            for index, method in sorted(command.association_methods.items())
+        ]
+    return snapshot
 
 
 def snapshot_context(

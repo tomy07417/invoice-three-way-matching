@@ -60,6 +60,17 @@ for (const [name, valid, call] of reads) {
     assert.deepEqual(await call(api), valid);
   });
 }
+test('AP responses preserve additive association provenance without breaking verified-link status', async t => {
+  const { api } = await loadTypeScript('../lib/api.ts');
+  const value = clone(review);
+  value.comparison_rows[0].association_status = 'explicit';
+  value.comparison_rows[0].association_method = 'description';
+  t.mock.method(globalThis, 'fetch', async () => Response.json(value));
+  for (const call of [() => api.reviewDetail(id), () => api.reevaluate(id, 0, 'Reason', 'csrf'),
+    () => api.decide(id, 0, 'approve', 'Reason', 'csrf')]) {
+    assert.deepEqual(await call(), value);
+  }
+});
 const invalidCases = [
   ['currentSession', 'unknown role', v => { v.actor.role = 'admin'; }],
   ['login', 'nested actor type', v => { v.actor.actor_id = '1'; }],
