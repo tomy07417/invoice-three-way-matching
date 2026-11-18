@@ -48,6 +48,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
     <header className="site-header"><Link href="/invoices" className="brand">Invoice intake</Link>
       <nav aria-label="Main navigation"><Link href="/invoices">Invoices</Link><Link href="/invoices/new">New invoice</Link>
         {session && session.actor.role !== 'intake' && <Link href="/review">AP review</Link>}
+        {session?.actor.role === 'ap_manager' && <><Link href="/manager">Manager</Link><Link href="/audit">Audit</Link></>}
         {session ? <button onClick={logout} disabled={leaving}>Log out</button> : <Link href="/login">Log in</Link>}
       </nav>
     </header>
