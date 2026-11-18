@@ -10,7 +10,8 @@ from app.interfaces.api.health import router as health_router
 from app.interfaces.api.purchase_orders import create_router
 
 
-def create_app(*, invoice_service=None, review_service=None, processing_enabled=None):
+def create_app(*, invoice_service=None, review_service=None, parameter_service=None,
+               audit_service=None, processing_enabled=None):
     """Enable with INVOICE_PROCESSING_ENABLED=1, or inject an InvoiceService.
 
     Injected services do not start a worker: tests/control tools explicitly call
@@ -33,15 +34,30 @@ def create_app(*, invoice_service=None, review_service=None, processing_enabled=
                                                          secure_cookie=os.environ.get('SESSION_SECURE_COOKIE') == '1'))
         application.include_router(build_invoice_router(invoice_service))
         # Lightweight injected invoice adapters must not acquire a new DB dependency.
-        if review_service is None and getattr(getattr(invoice_service, 'repository', None), 'engine', None) is not None:
-            from app.application.use_cases.review import ReviewService
-            from app.infrastructure.persistence.review_repository import SqlReviewRepository
-            review_service = ReviewService(invoice_service.sessions,
-                SqlReviewRepository(invoice_service.repository.engine),
-                clock=getattr(invoice_service.repository, 'clock', lambda: datetime.now(timezone.utc)))
+        engine = getattr(getattr(invoice_service, 'repository', None), 'engine', None)
+        if engine is not None:
+            if review_service is None:
+                from app.application.use_cases.review import ReviewService
+                from app.infrastructure.persistence.review_repository import SqlReviewRepository
+                review_service = ReviewService(invoice_service.sessions, SqlReviewRepository(engine),
+                    clock=getattr(invoice_service.repository, 'clock', lambda: datetime.now(timezone.utc)))
+            if parameter_service is None:
+                from app.application.use_cases.parameters import ParameterService
+                from app.infrastructure.persistence.parameter_repository import SqlParameterRepository
+                parameter_service = ParameterService(invoice_service.sessions, SqlParameterRepository(engine))
+            if audit_service is None:
+                from app.application.use_cases.audit import AuditService
+                from app.infrastructure.persistence.audit_repository import SqlAuditRepository
+                audit_service = AuditService(invoice_service.sessions, SqlAuditRepository(engine))
     if review_service is not None:
         from app.interfaces.api.review import build_review_router
         application.include_router(build_review_router(review_service))
+    if parameter_service is not None:
+        from app.interfaces.api.parameters import build_parameters_router
+        application.include_router(build_parameters_router(parameter_service))
+    if audit_service is not None:
+        from app.interfaces.api.audit import build_audit_router
+        application.include_router(build_audit_router(audit_service))
     return application
 
 
