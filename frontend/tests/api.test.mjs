@@ -4,6 +4,14 @@ import { loadTypeScript } from './load-typescript.mjs';
 
 const id = '11111111-2222-4333-8444-555555555555';
 const load = () => loadTypeScript('../lib/api.ts');
+const at = '2026-11-18T10:00:00Z';
+const session = { actor: { actor_id: 1, username: 'intake', role: 'intake' }, csrf_token: 'csrf', expires_at: at };
+const snapshot = { invoice_id: id, job_id: id, processing_status: 'QUEUED', attempts: 0,
+  next_eligible_at: at, created_at: at, updated_at: at, automatic_outcome: null, error: null };
+const summary = { ...snapshot, invoice_number: null, supplier_name: null, invoice_date: null,
+  total_amount: '123.4500', currency: null };
+const detail = { ...snapshot, document: { file_name: 'invoice.pdf', media_type: 'application/pdf', byte_size: 3,
+  sha256: 'a'.repeat(64), page_count: 1, pixel_width: null, pixel_height: null }, extraction: null, evaluation: null, findings: [] };
 function mockXHR(t, implementation) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'XMLHttpRequest');
   Object.defineProperty(globalThis, 'XMLHttpRequest', { value: implementation, configurable: true });
@@ -22,10 +30,12 @@ test('public reads use only same-origin routes, no-store and caller AbortSignal;
     assert.equal(init.signal, signal);
     assert.equal(init.credentials, 'same-origin');
     assert.equal(init.cache, 'no-store');
-    return Response.json({ total_amount: '123.4500' });
+    return Response.json(url.includes('/sessions/') ? session : url.endsWith('/processing')
+      ? { ...snapshot, attempt_history: [], events: [] } : url.includes('?')
+        ? { items: [summary], total: 1, offset: 20, limit: 10 } : detail);
   });
   await api.currentSession(signal);
-  assert.equal((await api.list({ offset: 20, limit: 10, status: 'COMPLETED' }, signal)).total_amount, '123.4500');
+  assert.equal((await api.list({ offset: 20, limit: 10, status: 'COMPLETED' }, signal)).items[0].total_amount, '123.4500');
   await api.detail(id, signal);
   await api.processing(id, signal);
   assert.deepEqual(seen, ['/api/backend/sessions/current', '/api/backend/invoices?offset=20&limit=10&status=COMPLETED',
@@ -40,7 +50,7 @@ test('login, logout and retry use exact methods and CSRF without exposing cookie
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     calls.push([url, init]);
     assert.equal(new Headers(init.headers).get('cookie'), null);
-    return init.method === 'DELETE' ? new Response(null, { status: 204 }) : Response.json({});
+    return init.method === 'DELETE' ? new Response(null, { status: 204 }) : Response.json(url.endsWith('/retry') ? snapshot : session);
   });
   await api.login('intake', 'password');
   assert.equal(await api.logout('csrf'), undefined);
@@ -94,7 +104,7 @@ test('XHR reports real bytes, caller stable idempotency and CSRF; retries never 
   const { api } = await load();
   const instances = [];
   class XHR {
-    upload = {}; headers = {}; status = 202; responseText = '{"invoice_id":"case","processing_status":"QUEUED"}';
+    upload = {}; headers = {}; status = 202; responseText = JSON.stringify(snapshot);
     constructor() { instances.push(this); }
     open(method, url) { this.method = method; this.url = url; }
     setRequestHeader(key, value) { this.headers[key] = value; }

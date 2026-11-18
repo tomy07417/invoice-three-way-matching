@@ -4,6 +4,8 @@ const TIMEOUT_MS = 15_000;
 const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 const invoicePath = new RegExp(`^/invoices/${UUID}(/processing|/document|/retry)?$`);
 const reviewPath = new RegExp(`^/review/${UUID}(/history|/reevaluations|/decisions|/escalations)?$`);
+const auditPath = new RegExp(`^/audit/${UUID}$`);
+const auditQuery = ['offset', 'limit', 'kind', 'actor_id', 'time_from', 'time_to'];
 const reviewQuery = ['offset', 'limit', 'supplier', 'date_from', 'date_to', 'min_amount', 'max_amount',
   'reason', 'operational_state', 'min_age_days', 'sort', 'direction', 'outcome'];
 
@@ -87,6 +89,8 @@ export async function proxyBackend(request: Request): Promise<Response> {
   else if (path === '/sessions/current') methods = ['GET', 'DELETE'];
   else if (path === '/invoices') methods = ['GET', 'POST'];
   else if (invoicePath.test(path)) methods = [path.endsWith('/retry') ? 'POST' : 'GET'];
+  else if (path === '/manager/parameters') methods = ['GET', 'PATCH'];
+  else if (path === '/manager/parameters/history' || auditPath.test(path)) methods = ['GET'];
   else if (path === '/review') methods = ['GET'];
   else if (reviewPath.test(path)) methods = path.endsWith('/history') ? ['GET']
     : /\/(reevaluations|decisions|escalations)$/.test(path) ? ['POST'] : ['GET', 'PATCH'];
@@ -100,7 +104,8 @@ export async function proxyBackend(request: Request): Promise<Response> {
     return failure(403, 'invalid_origin', 'Same-origin request required');
   }
   const queryKeys = request.method !== 'GET' ? [] : path === '/invoices' ? ['offset', 'limit', 'status']
-    : path === '/review' ? reviewQuery : [];
+    : path === '/review' ? reviewQuery : path === '/manager/parameters/history' ? ['offset', 'limit']
+      : auditPath.test(path) ? auditQuery : [];
   for (const key of url.searchParams.keys()) {
     if (!queryKeys.includes(key) || url.searchParams.getAll(key).length !== 1) {
       return failure(400, 'invalid_query', 'Invalid query parameters');
@@ -124,7 +129,8 @@ export async function proxyBackend(request: Request): Promise<Response> {
     const value = request.headers.get(name);
     if (mutation && value) headers.set(name, value);
   }
-  if (path.startsWith('/review/') && mutation && request.headers.has('if-match')) {
+  const versionedPath = path.startsWith('/review/') || path === '/manager/parameters';
+  if (versionedPath && mutation && request.headers.has('if-match')) {
     headers.set('if-match', request.headers.get('if-match')!);
   }
   const signal = AbortSignal.any([request.signal, AbortSignal.timeout(TIMEOUT_MS)]);
@@ -139,7 +145,9 @@ export async function proxyBackend(request: Request): Promise<Response> {
       return failure(502, 'upstream_redirect', 'Unexpected service response');
     }
     const responseHeaders = privateHeaders(upstream.headers);
-    if (path.startsWith('/review/') && upstream.headers.has('etag')) responseHeaders.set('etag', upstream.headers.get('etag')!);
+    if ((versionedPath || auditPath.test(path)) && upstream.headers.has('etag')) {
+      responseHeaders.set('etag', upstream.headers.get('etag')!);
+    }
     if (upstream.status === 204) return new Response(null, { status: 204, headers: responseHeaders });
     const content = await upstream.arrayBuffer();
     if (!upstream.ok && !upstream.headers.get('content-type')?.includes('application/json')) {

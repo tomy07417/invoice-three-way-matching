@@ -2,6 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadTypeScript } from './load-typescript.mjs';
 const id = '11111111-2222-4333-8444-555555555555';
+const at = '2026-11-18T10:00:00Z';
+const detail = { invoice_id: id, revision: 8, extraction_version: 1, extraction: null, original_extraction: null,
+  evaluation: null, comparison_rows: [], operational_state: 'REVIEW_REQUIRED', payment_blocked: true,
+  credit_note_pending: false, requires_reevaluation: false, eligibility: { allowed: false, requires_manager: false,
+    reason: null, limit_amount: '5000', limit_currency: 'USD' }, current_decision: null,
+  document_url: `/invoices/${id}/document`, created_at: at, updated_at: at };
+const summary = { invoice_id: id, revision: 8, invoice_number: null, supplier_name: null, invoice_date: null,
+  total_amount: '9007199254740993.1200', currency: null, operational_state: 'REVIEW_REQUIRED', payment_blocked: true,
+  automatic_outcome: null, reasons: [], requires_manager: false, created_at: at, age_seconds: 0 };
 
 test('review reads retain exact values, filters, same-origin credentials and aborts', async t => {
   const { api } = await loadTypeScript('../lib/api.ts');
@@ -12,10 +21,11 @@ test('review reads retain exact values, filters, same-origin credentials and abo
     assert.equal(init.signal, signal);
     assert.equal(init.credentials, 'same-origin');
     assert.equal(init.cache, 'no-store');
-    return Response.json({ total_amount: '9007199254740993.1200' });
+    return Response.json(url.includes('?') ? { items: [summary], total: 1, offset: 20, limit: 20 }
+      : url.endsWith('/history') ? { invoice_id: id, revision: 8, events: [] } : detail);
   });
   const result = await api.reviewList({ supplier: 'A & B', min_amount: '1.0100', outcome: 'all', offset: 20 }, signal);
-  assert.equal(result.total_amount, '9007199254740993.1200');
+  assert.equal(result.items[0].total_amount, '9007199254740993.1200');
   await api.reviewDetail(id, signal);
   await api.reviewHistory(id, signal);
   assert.deepEqual(requests, ['/api/backend/review?supplier=A+%26+B&min_amount=1.0100&outcome=all&offset=20',
@@ -25,8 +35,11 @@ test('review reads retain exact values, filters, same-origin credentials and abo
 test('review writes bind full exact draft, comment, CSRF and quoted expected revision', async t => {
   const { api } = await loadTypeScript('../lib/api.ts');
   const calls = [];
-  t.mock.method(globalThis, 'fetch', async (url, init) => { calls.push([url, init]); return Response.json({ revision: 8 }); });
-  const invoice = { total_amount: '24.0000', lines: [{ quantity: '2.00' }] };
+  t.mock.method(globalThis, 'fetch', async (url, init) => { calls.push([url, init]); return Response.json(detail); });
+  const invoice = { supplier_name: null, supplier_tax_id: null, invoice_number: null, invoice_date: null,
+    due_date: null, po_references: null, currency: null, subtotal: null, tax_amount: null, total_amount: '24.0000',
+    lines: [{ description: null, quantity: '2.00', unit_price: null, line_total: null, po_line_reference: null,
+      po_number: null, po_line_number: null, unit_price_basis: 'unknown' }] };
   await api.correctExtraction(id, 7, invoice, 'Verified original', 'csrf');
   await api.reevaluate(id, 8, 'Refresh evidence', 'csrf');
   await api.decide(id, 9, 'request_credit_note', 'Tax discrepancy', 'csrf');

@@ -8,8 +8,9 @@ export function isActive(status: ProcessingState): boolean {
   return ['QUEUED', 'EXTRACTING', 'EXTRACTED', 'EVALUATING', 'RETRY_WAIT'].includes(status);
 }
 export function safeReturnPath(value: string | null): string {
-  return value && /^(?:\/invoices(?:\/new|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?|\/review(?:\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?)$/i.test(value)
-    ? value : '/invoices';
+  const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  const routes = new RegExp(`^(?:/invoices(?:/new|/${uuid})?|/(?:review|audit)(?:/${uuid})?|/manager(?:/parameters|/escalations)?)$`, 'i');
+  return value && routes.test(value) ? value : '/invoices';
 }
 export function validateFile(file: { type: string; size: number }, maximum: number, types: readonly string[]): string | null {
   if (!types.includes(file.type)) return 'Choose a PDF, PNG or JPG (JPEG) document.';

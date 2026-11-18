@@ -91,6 +91,34 @@ export interface ProcessingDetail extends ProcessingSnapshot {
   events: Record<string, JsonValue>[];
 }
 
+export interface RuleValues { price_tolerance: DecimalString; analyst_approval_limit: DecimalString }
+export interface ParameterVersion extends RuleValues {
+  version_id: number; currency: 'USD'; effective_from: string;
+  actor: { actor_id: number; username: string; role: string } | null;
+  actor_reference: string;
+}
+export interface ParameterChange extends ParameterVersion {
+  previous_version_id: number | null; before: RuleValues | null; after: RuleValues;
+  comment: string | null; provenance: 'manager_change' | 'bootstrap' | 'historical_unknown';
+}
+export interface ParameterHistory { items: ParameterChange[]; total: number; offset: number; limit: number }
+export interface ParameterUpdate { price_tolerance?: DecimalString; analyst_approval_limit?: DecimalString; comment?: string | null }
+export type AuditKind = 'creation' | 'extraction' | 'evaluation' | 'correction' | 'reevaluation'
+  | 'decision' | 'escalation' | 'credit_note_request' | 'state_change' | 'approval_reversal';
+export interface AuditFilters {
+  offset?: number; limit?: number; kind?: AuditKind; actor_id?: string; time_from?: string; time_to?: string;
+}
+export interface AuditEvent {
+  id: string; kind: AuditKind; at: string | null;
+  actor: { id: string | null; name: string | null; role: string | null; type: 'recorded' | 'system' | 'unknown' };
+  provenance: { source: string; source_id: string; derived: boolean; note: string | null };
+  revision: number | null; extraction_version: number | null; evaluation_id: number | null;
+  current: boolean; comment: string | null;
+  diffs: { field: string; before: JsonValue; after: JsonValue; before_known: boolean; derived: boolean; source: string }[];
+  evidence: Record<string, JsonValue>;
+}
+export interface AuditHistory { invoice_id: string; revision: number; events: AuditEvent[]; total: number; offset: number; limit: number }
+
 export type ReviewState = 'REVIEW_REQUIRED' | 'REEVALUATION_REQUIRED' | 'ESCALATED' | 'APPROVED' | 'REJECTED' | 'CREDIT_NOTE_REQUESTED';
 export type ReviewAction = 'approve' | 'reject' | 'request_credit_note';
 export interface ApprovalEligibility {
@@ -98,7 +126,10 @@ export interface ApprovalEligibility {
   limit_amount: DecimalString; limit_currency: 'USD';
 }
 export interface ComparisonFinding {
-  rule: string; message: string; evidence: Finding;
+  rule: string; message: string;
+  // Backend comparison_rows projects locators/outcome only, not code/reason.
+  evidence: { outcome: Finding['outcome']; po_number: string | null;
+    line_index: number | null; po_line_number: number | null };
 }
 export interface ComparisonRow {
   line_index: number; description: string | null;
