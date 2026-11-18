@@ -90,3 +90,53 @@ export interface ProcessingDetail extends ProcessingSnapshot {
   attempt_history: Record<string, JsonValue>[];
   events: Record<string, JsonValue>[];
 }
+
+export type ReviewState = 'REVIEW_REQUIRED' | 'REEVALUATION_REQUIRED' | 'ESCALATED' | 'APPROVED' | 'REJECTED' | 'CREDIT_NOTE_REQUESTED';
+export type ReviewAction = 'approve' | 'reject' | 'request_credit_note';
+export interface ApprovalEligibility {
+  allowed: boolean; requires_manager: boolean; reason: string | null;
+  limit_amount: DecimalString; limit_currency: 'USD';
+}
+export interface ComparisonFinding {
+  rule: string; message: string; evidence: Finding;
+}
+export interface ComparisonRow {
+  line_index: number; description: string | null;
+  quantity_invoiced: DecimalString | null; po_number: string | null; po_line_number: number | null;
+  quantity_ordered: DecimalString | null; quantity_received: DecimalString | null;
+  quantity_previously_approved: DecimalString | null; quantity_available: DecimalString | null;
+  po_net_unit_price: DecimalString | null; invoice_net_unit_price: DecimalString | null;
+  invoice_currency: string | null; po_currency: string | null; tolerance: DecimalString | null;
+  association_status: 'explicit' | 'unresolved'; findings: ComparisonFinding[];
+}
+export interface ReviewDetail {
+  invoice_id: string; revision: number; extraction_version: number;
+  extraction: InvoiceDraft | null; original_extraction: InvoiceDraft | null;
+  evaluation: Evaluation | null; comparison_rows: ComparisonRow[];
+  operational_state: ReviewState; payment_blocked: boolean; credit_note_pending: boolean;
+  requires_reevaluation: boolean; eligibility: ApprovalEligibility;
+  current_decision: { id: number; revision: number; extraction_version: number; evaluation_id: number | null;
+    action: ReviewAction; actor_id: string; at: string; comment: string } | null;
+  document_url: string; created_at: string; updated_at: string;
+}
+export interface ReviewSummary {
+  invoice_id: string; revision: number; invoice_number: string | null; supplier_name: string | null;
+  invoice_date: string | null; total_amount: DecimalString | null; currency: string | null;
+  operational_state: ReviewState; payment_blocked: boolean; automatic_outcome: AutomaticOutcome | null;
+  reasons: string[]; requires_manager: boolean; created_at: string; age_seconds: number;
+}
+export interface ReviewQueuePage { items: ReviewSummary[]; total: number; offset: number; limit: number }
+export interface ReviewListOptions {
+  offset?: number; limit?: number; supplier?: string; date_from?: string; date_to?: string;
+  min_amount?: DecimalString; max_amount?: DecimalString; reason?: string; operational_state?: ReviewState;
+  min_age_days?: number; sort?: 'created_at' | 'age' | 'amount' | 'supplier' | 'invoice_date';
+  direction?: 'asc' | 'desc'; outcome?: AutomaticOutcome | 'all';
+}
+export interface ReviewHistoryEvent {
+  kind: string; at: string; actor_id: string; actor_name?: string; actor_role?: string;
+  comment: string; current: boolean; revision?: number; extraction_version?: number;
+  evaluation_id?: number | null; decision_id?: number; action?: ReviewAction;
+  evaluation?: Evaluation | null; invoice?: InvoiceDraft | null;
+  [key: string]: unknown;
+}
+export interface ReviewHistory { invoice_id: string; revision: number; events: ReviewHistoryEvent[] }

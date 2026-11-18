@@ -3,6 +3,9 @@ export const MAX_PROXY_BODY_BYTES = 8 * 1024 * 1024 + 64 * 1024;
 const TIMEOUT_MS = 15_000;
 const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 const invoicePath = new RegExp(`^/invoices/${UUID}(/processing|/document|/retry)?$`);
+const reviewPath = new RegExp(`^/review/${UUID}(/history|/reevaluations|/decisions|/escalations)?$`);
+const reviewQuery = ['offset', 'limit', 'supplier', 'date_from', 'date_to', 'min_amount', 'max_amount',
+  'reason', 'operational_state', 'min_age_days', 'sort', 'direction', 'outcome'];
 
 function privateHeaders(source?: Headers): Headers {
   const headers = new Headers();
@@ -84,6 +87,9 @@ export async function proxyBackend(request: Request): Promise<Response> {
   else if (path === '/sessions/current') methods = ['GET', 'DELETE'];
   else if (path === '/invoices') methods = ['GET', 'POST'];
   else if (invoicePath.test(path)) methods = [path.endsWith('/retry') ? 'POST' : 'GET'];
+  else if (path === '/review') methods = ['GET'];
+  else if (reviewPath.test(path)) methods = path.endsWith('/history') ? ['GET']
+    : /\/(reevaluations|decisions|escalations)$/.test(path) ? ['POST'] : ['GET', 'PATCH'];
   else return failure(404, 'not_found', 'Route not found');
   if (!methods.includes(request.method)) return failure(405, 'method_not_allowed', 'Method not allowed');
   let expectedOrigin: string;
@@ -93,9 +99,10 @@ export async function proxyBackend(request: Request): Promise<Response> {
   if (mutation && request.headers.get('origin') !== expectedOrigin) {
     return failure(403, 'invalid_origin', 'Same-origin request required');
   }
+  const queryKeys = request.method !== 'GET' ? [] : path === '/invoices' ? ['offset', 'limit', 'status']
+    : path === '/review' ? reviewQuery : [];
   for (const key of url.searchParams.keys()) {
-    if (path !== '/invoices' || request.method !== 'GET'
-      || !['offset', 'limit', 'status'].includes(key) || url.searchParams.getAll(key).length !== 1) {
+    if (!queryKeys.includes(key) || url.searchParams.getAll(key).length !== 1) {
       return failure(400, 'invalid_query', 'Invalid query parameters');
     }
   }
@@ -117,9 +124,12 @@ export async function proxyBackend(request: Request): Promise<Response> {
     const value = request.headers.get(name);
     if (mutation && value) headers.set(name, value);
   }
+  if (path.startsWith('/review/') && mutation && request.headers.has('if-match')) {
+    headers.set('if-match', request.headers.get('if-match')!);
+  }
   const signal = AbortSignal.any([request.signal, AbortSignal.timeout(TIMEOUT_MS)]);
   try {
-    const body = request.method === 'POST' ? await readBody(request, signal) : undefined;
+    const body = request.method === 'POST' || request.method === 'PATCH' ? await readBody(request, signal) : undefined;
     const upstream = await fetch(origin + path + url.search, {
       method: request.method, headers, body: body as BodyInit | undefined,
       cache: 'no-store', redirect: 'manual', signal,
@@ -129,6 +139,7 @@ export async function proxyBackend(request: Request): Promise<Response> {
       return failure(502, 'upstream_redirect', 'Unexpected service response');
     }
     const responseHeaders = privateHeaders(upstream.headers);
+    if (path.startsWith('/review/') && upstream.headers.has('etag')) responseHeaders.set('etag', upstream.headers.get('etag')!);
     if (upstream.status === 204) return new Response(null, { status: 204, headers: responseHeaders });
     const content = await upstream.arrayBuffer();
     if (!upstream.ok && !upstream.headers.get('content-type')?.includes('application/json')) {

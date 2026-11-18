@@ -1,4 +1,5 @@
-import type { InvoiceDetail, InvoicePage, ListOptions, ProcessingDetail, ProcessingSnapshot, Session } from './contracts';
+import type { InvoiceDetail, InvoiceDraft, InvoicePage, ListOptions, ProcessingDetail, ProcessingSnapshot, Session,
+  ReviewAction, ReviewDetail, ReviewHistory, ReviewListOptions, ReviewQueuePage } from './contracts';
 
 const ROOT = '/api/backend';
 export const MAX_INVOICE_BYTES = 8 * 1024 * 1024;
@@ -60,6 +61,15 @@ function invoicePath(id: string): string {
   }
   return `/invoices/${id}`;
 }
+function reviewCasePath(id: string): string {
+  return invoicePath(id).replace('/invoices/', '/review/');
+}
+function reviewMutation(path: string, method: 'POST' | 'PATCH', revision: number, csrfToken: string, body: unknown) {
+  if (!Number.isInteger(revision) || revision < 0 || revision > 2147483647) throw new TypeError('Invalid case revision');
+  return request<ReviewDetail>(path, { method, headers: {
+    'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken, 'If-Match': `"${revision}"`,
+  }, body: JSON.stringify(body) });
+}
 export interface UploadProgress { loaded: number; total: number | null }
 export interface UploadOptions {
   csrfToken: string;
@@ -120,4 +130,19 @@ export const api = {
   }),
   uploadInvoice,
   documentURL: (id: string) => ROOT + invoicePath(id) + '/document',
+  reviewList: (options: ReviewListOptions = {}, signal?: AbortSignal) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== '') query.set(key, String(value));
+    return request<ReviewQueuePage>('/review' + (query.size ? `?${query}` : ''), { signal });
+  },
+  reviewDetail: (id: string, signal?: AbortSignal) => request<ReviewDetail>(reviewCasePath(id), { signal }),
+  reviewHistory: (id: string, signal?: AbortSignal) => request<ReviewHistory>(reviewCasePath(id) + '/history', { signal }),
+  correctExtraction: (id: string, revision: number, invoice: InvoiceDraft, comment: string, csrf: string) =>
+    reviewMutation(reviewCasePath(id), 'PATCH', revision, csrf, { invoice, comment }),
+  reevaluate: (id: string, revision: number, comment: string, csrf: string) =>
+    reviewMutation(reviewCasePath(id) + '/reevaluations', 'POST', revision, csrf, { comment }),
+  decide: (id: string, revision: number, action: ReviewAction, comment: string, csrf: string) =>
+    reviewMutation(reviewCasePath(id) + '/decisions', 'POST', revision, csrf, { action, comment }),
+  escalate: (id: string, revision: number, comment: string, csrf: string) =>
+    reviewMutation(reviewCasePath(id) + '/escalations', 'POST', revision, csrf, { comment }),
 };
