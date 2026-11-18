@@ -24,6 +24,7 @@ from app.infrastructure.persistence.evaluation_records import (
     RuleConfigurationVersion, restore_evaluation,
 )
 from app.infrastructure.persistence.reference_data_repository import ReferenceDataTransaction, column_values
+from app.infrastructure.persistence.review_visibility import active_approval_clause, current_other_invoice_clause
 
 
 class SqlAlchemyInvoiceEvaluationTransaction:
@@ -92,13 +93,13 @@ class SqlAlchemyInvoiceEvaluationTransaction:
     def get_approved_quantities(self, po_numbers):
         ledger = ApprovedPaymentQuantity
         rows = self.session.execute(select(ledger.po_number, ledger.po_line_number, func.sum(ledger.quantity))
-                                    .where(ledger.po_number.in_(po_numbers))
+                                    .where(ledger.po_number.in_(po_numbers), active_approval_clause(ledger))
                                     .group_by(ledger.po_number, ledger.po_line_number))
         return {LineAssociation(po, line): quantity for po, line, quantity in rows}
 
     def get_invoice_history(self, exclude_invoice_id):
         rows = self.session.scalars(select(models.Invoice).where(
-            models.Invoice.id != exclude_invoice_id).order_by(models.Invoice.id)).all()
+            current_other_invoice_clause(models.Invoice, exclude_invoice_id)).order_by(models.Invoice.id)).all()
         if any(row.resolved_supplier_id is None for row in rows):
             return None
         return tuple(InvoiceHistoryEntry(row.resolved_supplier_id, row.invoice_number,
