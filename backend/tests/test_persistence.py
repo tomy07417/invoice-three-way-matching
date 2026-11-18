@@ -8,7 +8,7 @@ from sqlalchemy import Date, Numeric, inspect, insert, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.infrastructure.persistence.connection import build_database_url, create_database_engine
-from app.infrastructure.persistence import auth_models, evaluation_records, processing_models, review_models  # Register all persistence metadata.
+from app.infrastructure.persistence import auth_models, evaluation_records, parameter_models, processing_models, review_models  # Register all persistence metadata.
 from app.infrastructure.persistence.models import (
     Base, GoodsReceivedNoteLine, Invoice, InvoiceLine, InvoicePOReference,
     PurchaseOrderLine, Supplier,
@@ -61,7 +61,7 @@ def test_model_metadata_preserves_domain_shapes():
         "evaluation_rule_findings", "users", "user_sessions", "upload_cases",
         "processing_control", "processing_attempts", "processing_events",
         "review_cases", "review_extraction_versions", "review_evaluation_links", "review_decisions",
-        "review_approval_links", "review_approval_reversals", "review_audit_events",
+        "review_approval_links", "review_approval_reversals", "review_audit_events", "parameter_changes",
     }
     assert list(PurchaseOrderLine.__table__.primary_key.columns.keys()) == ["po_number", "line_number"]
     assert list(GoodsReceivedNoteLine.__table__.primary_key.columns.keys()) == ["grn_number", "po_line_number"]
@@ -115,6 +115,49 @@ def test_upgrade_existing_invoice(database_url, alembic_cli):
             assert tx.get_invoice_state(invoice_id) == "received"
             assert tx.get_approved_quantities(("unknown",)) == {}
             assert tx.list_evaluations(invoice_id) == ()
+    finally:
+        engine.dispose()
+
+
+def test_manager_migration_preserves_config_evaluation_and_upload(database_url, alembic_cli):
+    """0006 only adds evidence storage; existing public reads remain identical."""
+    from sqlalchemy import create_engine
+    from app.application.dtos.auth import Role
+    from app.application.dtos.invoice_documents import DocumentMetadata
+    from app.application.dtos.invoice_evaluation import EvaluateInvoiceCommand
+    from app.application.use_cases.evaluate_invoice import EvaluateInvoiceUseCase
+    from app.application.use_cases.sessions import SessionService
+    from app.domain.entities import Invoice as DomainInvoice
+    from app.infrastructure.persistence.auth_repository import SqlAuthRepository
+    from app.infrastructure.persistence.invoice_evaluation_repository import SqlAlchemyInvoiceEvaluationRepository
+    from app.infrastructure.persistence.processing_repository import SqlProcessingRepository
+
+    alembic_cli('upgrade', '0005')
+    engine = create_engine(database_url)
+    try:
+        sessions = SessionService(SqlAuthRepository(engine))
+        actor = sessions.provision('historic', 'long enough password', Role.AP_MANAGER)
+        processing = SqlProcessingRepository(engine)
+        upload = processing.admit(actor, 'historic-upload', 'private-key',
+            DocumentMetadata('historic.pdf', 'application/pdf', 1, '0' * 64, 1), 100)
+        repository = SqlAlchemyInvoiceEvaluationRepository(engine)
+        raw = DomainInvoice('Historic', 'tax', 'HISTORIC', date(2020, 1, 1), None, (),
+                            'USD', Decimal('1'), Decimal('0'), Decimal('1'), ())
+        record = EvaluateInvoiceUseCase(repository).execute(EvaluateInvoiceCommand(raw, 'historic-service'))
+        with repository.transaction() as tx:
+            original_config = tx.get_configuration(record.evaluated_at)
+            original_records = tx.list_evaluations(record.invoice_id)
+        alembic_cli('upgrade', 'head')
+        alembic_cli('upgrade', 'head')
+        with repository.transaction() as tx:
+            assert tx.get_configuration(record.evaluated_at) == original_config
+            assert tx.list_evaluations(record.invoice_id) == original_records
+            assert tx.get_invoice(record.invoice_id) == raw
+        assert processing.get(actor, upload.invoice_id) == upload
+        from app.infrastructure.persistence.parameter_repository import SqlParameterRepository
+        parameters = SqlParameterRepository(engine)
+        assert parameters.history(offset=0, limit=100)['total'] == 1
+        assert parameters.current()['actor'] is None
     finally:
         engine.dispose()
 
