@@ -12,7 +12,7 @@ The three documents serve different purposes:
 | Purchase Order (PO) | What was ordered, from which supplier, and at what agreed price. |
 | Goods Received Note (GRN) | What was received; several GRNs can contribute to the received quantity of one PO line. |
 
-The intended workflow is to upload an invoice, extract structured fields with Azure OpenAI, retrieve the relevant reference data, and run deterministic Python checks. **The model extracts data; it does not decide payment outcomes.** The opt-in backend accepts private uploads, processes durable Azure extraction jobs and atomically persists deterministic evaluations when mandatory evidence is available. The Intake frontend is implemented and undergoing acceptance verification; human-review workflows remain pending. See [Intake setup and limitations](docs/INVOICE_INTAKE.md) and [durable processing setup and retry rules](docs/INVOICE_PROCESSING.md). Structured invoices can also be evaluated through the application use case below.
+The intended workflow is to upload an invoice, extract structured fields with Azure OpenAI, retrieve the relevant reference data, and run deterministic Python checks. **The model extracts data; it does not decide payment outcomes.** The opt-in backend accepts private uploads, processes durable Azure extraction jobs and atomically persists deterministic evaluations when mandatory evidence is available. The Intake frontend and AP review workspace are implemented; controlled-provider browser acceptance passed. Independent AP verification covered backend execution and frontend contract inspection; independent frontend execution was unavailable. Live Azure end-to-end proof remains a separate gap. See [Intake setup and limitations](docs/INVOICE_INTAKE.md) and [durable processing setup and retry rules](docs/INVOICE_PROCESSING.md). Structured invoices can also be evaluated through the application use case below.
 
 The matching engine evaluates resolved input data with this precedence:
 
@@ -26,15 +26,15 @@ Price tolerance defaults to **2% per line**, using exact Decimal arithmetic. The
 
 | Capability | Current state |
 | --- | --- |
-| Local stack | Next.js Intake routes, FastAPI backend, PostgreSQL, and Docker Compose. Intake acceptance verification remains in progress. |
+| Local stack | Next.js Intake/AP routes, FastAPI backend, PostgreSQL, and Docker Compose. Real browser acceptance uses an isolated database and controlled extractor. |
 | Reference data | Domain entities, explicit migrations, and an atomic, repeatable JSON importer for suppliers, POs, and GRNs. |
 | PO inspection | Read-only HTTP endpoint with PO lines and received quantities aggregated across GRNs. |
 | Matching | Pure deterministic engine with explicit historical/approval inputs, structured reasons and missing-evidence reporting; invoked by durable processing. |
 | Evaluation integration | Structured-input use case, consistent PostgreSQL context, versioned configuration, append-only evaluation/findings and evidence snapshots; available through document detail. |
 | Extraction adapter | Async single-attempt Azure Responses adapter, strict nullable schema, exact Decimal/date parsing and sanitized retry classification; integrated with durable jobs. |
-| Invoice workflow | Opt-in authenticated upload/status/detail/private-document API, durable extraction and atomic evaluation linkage. Intake login/list/upload/detail is under verification; corrections, human review, approvals and payments remain unimplemented. |
+| Invoice workflow | Private Intake, durable extraction/evaluation, versioned AP corrections, manual reevaluation, human decisions, quantity-safe approval, escalation and audit views. No banking payments. |
 
-The client has clarified the nine previously open business questions; [the PRD](docs/PRD.md#official-client-clarifications) records those requirements separately from the accepted design policies below. The clarified pure rules are implemented independently of operational integration. Approval transactions, human decisions, corrected-invoice versioning, credit-note requests and a user-facing reevaluation workflow remain future work. Explicit evaluation of unchanged input now appends audited evidence without replacing earlier results.
+The client has clarified the nine previously open business questions; [the PRD](docs/PRD.md#official-client-clarifications) records those requirements separately from the accepted design policies below. The clarified pure rules are implemented independently of operational integration. The AP workflow below implements approval transactions, versioned corrections, human decisions, credit-note payment blocks and manual reevaluation, separately from the unchanged deterministic engine. Explicit evaluation of unchanged input now appends audited evidence without replacing earlier results.
 
 ## Architecture at a glance
 
@@ -45,7 +45,7 @@ The backend is a **single hexagonal monolith**, not a set of microservices:
 - **Infrastructure** (`backend/app/infrastructure/`): concrete adapters, including PostgreSQL persistence and JSON reference-data reading.
 - **Interfaces** (`backend/app/interfaces/`): HTTP routes and the import CLI. `main.py` wires the backend components together.
 
-The Next.js frontend communicates with the FastAPI backend over HTTP; it never accesses the database or an extraction model directly. PostgreSQL stores reference data, raw invoices and automatic evaluation evidence. Human decisions and payment workflows are not wired up. See [Architecture](docs/ARCHITECTURE.md) for dependency rules and the proposed extension points.
+The Next.js frontend communicates with the FastAPI backend over HTTP; it never accesses the database or an extraction model directly. PostgreSQL stores reference data, raw invoices and automatic evaluation evidence. Versioned human decisions and compensating approval releases are persisted by the AP workflow; banking payments are out of scope. See [Architecture](docs/ARCHITECTURE.md) for dependency rules and the proposed extension points.
 
 ## Quick start with Docker Compose
 
@@ -147,10 +147,10 @@ Unknown POs return HTTP 404 with `{"detail":"Purchase order not found"}`. Missin
 One PostgreSQL **REPEATABLE READ** transaction registers the input, reads reference data/configuration/other-case history/approved quantities, invokes the existing pure engine, and persists all findings and original context before returning. Failures, including commit failures, roll back staged invoice/evaluation changes; database errors expose no connection details. Reading all reference data is appropriate for the challenge dataset, not a large-scale query strategy.
 
 - Migration `0002` preserves existing invoices and raw/nonexistent references. It adds nullable resolved supplier identity, technical state, `rule_configuration_versions`, `approved_payment_quantities`, `invoice_evaluations` and ordered `evaluation_rule_findings`.
-- The **initially empty approval ledger is authoritative**, as confirmed by the owner. Evaluating only reads it: received, rejected, held and Auto-Pay evaluations never create approved consumption or payments. Future approval transactions must revalidate quantities atomically; snapshot isolation alone does not prevent overapproval.
+- The **initially empty approval ledger is authoritative**, as confirmed by the owner. Evaluating only reads it: received, rejected, held and Auto-Pay evaluations never create approved consumption or payments. The AP approval transaction below revalidates quantities atomically; snapshot isolation alone does not prevent overapproval.
 - Configuration is selected by effective evaluation time, seeded with tolerance `0.02` and analyst limit `5000`. Each evaluation retains its configuration ID and exact values. There is no configuration-management endpoint or authorization workflow.
 - Operational states are `received`, `evaluated` and `evaluation_incomplete`, separate from automatic outcomes. Missing mandatory evidence preserves `final_status=None`; an unresolved supplier on another invoice makes history unavailable, not authoritatively empty.
-- Supply `invoice_id` to reevaluate **identical raw input** as the same case, excluding it from duplicate history. Each invocation appends a new evaluation. Different raw data raises a conflict; corrected versions, linked resubmissions and human-decision invalidation are not implemented.
+- Supply `invoice_id` to reevaluate **identical raw input** as the same case, excluding it from duplicate history. Each invocation appends a new evaluation. Different raw data raises a conflict through this low-level interface; uploaded cases use the separate AP correction workflow for versioning and human-decision invalidation.
 - Evidence includes actor/origin/time, all PASS/HOLD/REJECT/PENDING findings and JSON snapshots with exact Decimal strings. Snapshots are detached copies and must not be edited by consumers. Append-only is the repository contract, not database-admin tamper protection.
 
 ### Application example
@@ -302,7 +302,7 @@ The confirmed-policy implementation passed **201 backend tests with no skips** a
 
 Coverage includes approved-only consumption, grouped quantities, duplicate normalization, same-supplier/currency similarity, net-price tolerance, every referenced PO, inactive/closed states, ambiguous associations, later GRNs, missing evidence, precedence and immutable evaluation snapshots.
 
-Corrections/versioning, human-decision invalidation, credit-note payment blocks, a user-facing reevaluation workflow, authorization and atomic approval recording still require application/persistence work. Automatic evaluation persistence and explicit same-input reevaluation are now implemented through the application interface above. A successful matching evaluation alone never authorizes a payment.
+At that historical checkpoint, corrections and atomic approval still required application work. The PRD03 AP workflow below now implements these boundaries; the historical pure-rule result is not their verification record. Automatic evaluation persistence and explicit same-input reevaluation are now implemented through the application interface above. A successful matching evaluation alone never authorizes a payment.
 
 ### Run checks
 
@@ -338,7 +338,60 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 | Secrets | PostgreSQL variables are supplied only to database/backend services. No credentials or model/database calls are exposed to the frontend. |
 | Health | API liveness only; database readiness is a separate Compose check. |
 
+## AP review workspace (PRD03)
+
+AP Analyst and Manager accounts can open **AP review** in the navigation or visit `/review`. Intake accounts cannot access this workspace or its backend API. The queue defaults to Held for Review; choose **All outcomes / incomplete cases** to find a case after its automatic result changes. Filters cover supplier, invoice date, exact amount, reason, operational state and age, with sorting and pagination.
+
+The detail pairs the private original with original/current extracted headers and evaluation-time PO/GRN evidence. **Correct extraction** opens nullable header/line fields and explicit PO-local associations. Decimal inputs remain strings; blank fields mean unknown, while an empty known PO list means none. Enter a reason, preview changed fields, then confirm the correction. This revokes existing authorization with audit; enter a new comment and select **Reevaluate** before making a new decision. Reevaluation also supersedes the current decision and never calls Azure.
+
+Approval, rejection, credit-note requests and Manager escalation require comments. Controls reflect server eligibility rather than browser amount arithmetic. A stale version or uncertain mutation pauses actions until **Refresh case**; mutations are not automatically replayed. History distinguishes current versions/decisions from historical evaluations, decisions and compensating reversals.
+
+Observed self-verification: **599 backend tests**, no skips, against isolated PostgreSQL; **31 frontend tests on Node 24**, TypeScript and production build; real Chrome AP acceptance plus unchanged Intake regression. Independent backend verification passed 156 focused tests and two additional quantity/receipt probes, now retained as regression tests and separately passed by the parent. It found a comparison-row rendering defect: focused actual Chrome reproduced RED, then passed after the type/render correction and a fresh Node24 build. One targeted independent contract inspection confirmed that original blocker resolved, with browser evidence explicitly attributed to the parent. Its optional frontend test/typecheck attempt remained unavailable because scratch dependency links lacked the pnpm store. A third supplemental probe observed one approval/correction winner (200/409) before its own stale-CSRF fixture failed; remaining probe assertions were not executed. No independent frontend execution or native approval is claimed. These checks use a controlled extractor and make no Azure or banking calls.
+
+Use the existing opt-in processing setup and run `alembic upgrade head` before starting the API. Migration `0005` adds review tables without rewriting original uploads, raw invoices, automatic evaluations or approval facts. Provision AP accounts with the existing operator CLI (`--role ap_analyst` or `--role ap_manager`); no public signup or new authentication mechanism is introduced.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /review` | Held queue by default; supplier, invoice-date range, exact min/max amount, readable reason, operational state, minimum age, order and pagination filters. `outcome=all` includes other automatic outcomes/incomplete cases. |
+| `GET /review/{id}` | Current AP extraction, original extraction, evaluation-time PO/GRN comparison, eligibility and payment block. |
+| `GET /review/{id}/history` | Original and corrected versions, automatic evidence, human decisions, actor/time/comment and applicability. |
+| `PATCH /review/{id}` | Full nullable extraction under `invoice` plus mandatory `comment`; blocks decisions until reevaluation. Decimal inputs must be strings; the body limit is 256 KiB. |
+| `POST /review/{id}/reevaluations` | Deterministic reevaluation with mandatory `comment`; no Azure call. |
+| `POST /review/{id}/decisions` | `action`: `approve`, `reject` or `request_credit_note`, with mandatory `comment`. |
+| `POST /review/{id}/escalations` | Audited request for above-limit/non-USD Manager approval, with mandatory `comment`. |
+
+All routes require an AP session; mutations additionally require the existing CSRF header and `If-Match` containing the quoted revision returned by the detail/history ETag (for example `"0"`). Missing revisions return 428; stale edits/decisions return 409 without new audit or consumption. Refresh and review current evidence instead of blindly retrying an uncertain mutation.
+
+Analyst may approve up to **5,000 USD inclusive**. Above that amount or in another currency, Manager is required; no FX occurs. Approval additionally requires complete current evidence, reliable positive PO-line quantities/net prices, no active same-supplier normalized-number authorization, and sufficient currently received/unconsumed quantities. An override does not invent missing evidence or receipts. A rejected case consumes nothing. Credit-note requests retain their operational payment block across reevaluation; the external resolution workflow is out of scope.
+
+A relevant correction revokes the prior authorization and releases its consumption with an append-only audited reversal. The original decision, raw versions and automatic results remain historical evidence. Reevaluation does not rerun extraction. Original Intake endpoints retain the original document/extraction/evaluation; use the AP detail/history for the versioned review state.
+
+One short PostgreSQL transaction serializes review mutations using a global advisory lock, with shared reference-table locks against imports and bounded statement/lock waits. Fresh consumption is read after waiting; concurrent approvals cannot reserve the same receipts twice. This deliberately favors understandable local-demo correctness over high throughput; no queue, cache or service was added. Approval authorizes payment but does not execute a bank transfer.
+
+### Reproduce AP acceptance
+
+After dependencies are installed, export `TEST_DATABASE_URL` for an isolated PostgreSQL service/database with a `test_` prefix and create-database permission. The fixture creates and drops only its own disposable database. It provisions synthetic accounts and uses a controlled extractor; never point it at application data.
+
+```sh
+node --test frontend/tests/api.test.mjs frontend/tests/backend-proxy.test.mjs frontend/tests/intake-state.test.mjs frontend/tests/review-transport.test.mjs frontend/tests/review-state.test.mjs
+node --test frontend/tests/cdp-cleanup.test.mjs
+```
+
+Browser checks require installed Google Chrome at `/usr/bin/google-chrome` and an already-built/running frontend on loopback port 3212, configured with server-only `BACKEND_INTERNAL_URL=http://127.0.0.1:3211`, `FRONTEND_ORIGIN=http://127.0.0.1:3212` and `PORT=3212`. The script starts/stops its own real FastAPI fixture on 3211; reserve both ports. It checks role denial, comment enforcement, double-click protection, correction/release/reevaluation/history, stale edits, Manager escalation, credit-note payment blocks, narrow mobile layout and real session-expiry return paths.
+
+```sh
+node frontend/tests/review-browser.mjs
+# Narrow regression for readable per-line messages and PASS filtering:
+AP_REVIEW_FOCUS=comparison node frontend/tests/review-browser.mjs
+# Run separately, after the first fixture has stopped, to verify existing Intake behavior:
+node frontend/tests/intake-browser.mjs
+```
+
+The host CDP tooling may use the installed Node runtime; the application build/server and transport test evidence above used the declared Node 24. The earlier acceptance attempt passed AP flows but failed profile cleanup (`ENOTEMPTY`); after a focused RED/GREEN cleanup fix, the final AP+Intake command exited 0. This is not independent security certification. Documents are verified via private links/bytes, not a saved download artifact.
+
 ## Decision log
+
+Decisions D1–D15 record earlier implementation milestones. References to deferred work describe those checkpoints; the current AP capabilities and limitations are stated above and below.
 
 ### D1 — Hexagonal backend architecture (Ports & Adapters)
 
@@ -442,6 +495,14 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 **Boundary/trade-off:** Retry scheduling belongs to the future durable processor, preserving one request per attempt and unknown token usage on failure. Safe error codes and optional `Retry-After` delays support that processor without retaining provider exception chains. Transport limits and timeouts bound resources, but do not implement durable admission, global concurrency, token reservations or retries. Incomplete evidence is not an automatic payment decision.
 
+### D16 — USD approval limit without conversion
+
+**Owner decision:** Analyst may approve at most 5,000 USD inclusive. Higher USD totals and every other currency require Manager, without automatic FX. The numeric limit comes from the evaluation's configuration snapshot; currency eligibility is enforced server-side, not through browser arithmetic.
+
+### D17 — Audited release when an approved case is corrected
+
+**Owner decision:** A relevant correction revokes the prior payment authorization and releases consumed quantities with a traceable reversal. Previous decisions and evaluations are not deleted. Payment remains blocked until reevaluation and a new approval. No banking payment has been executed by this application. Pending credit-note requests remain explicit payment blocks; their external resolution is not implemented.
+
 ## Current limitations
 
-This is a local-demo backend, not a production deployment. Authenticated private uploads, durable extraction retries and deterministic evaluation integration are implemented; the Intake frontend is under acceptance verification; corrections, human decisions and audit views remain pending. PostgreSQL-backed integration tests passed, but the latest real Azure workflow remained in RETRY_WAIT with provider_unavailable, so full live end-to-end verification is still pending. Container images favor a simple reproducible scaffold over optimized size. The official business answers are implemented in pure matching rules; undefined arithmetic and approval-limit policies are not silently invented.
+This is a local demo, not a production deployment. Private Intake and AP correction/decision/audit workflows have controlled-provider browser proof, with independent backend execution and targeted frontend contract inspection, not independent frontend execution: that optional attempt was unavailable because of scratch dependency setup. The comparison-row blocker was corrected and rechecked; parent Node24 build/browser evidence supplies the functional UI proof. The earlier independent PRD02 security run produced no verdict and is not replaced by these functional checks. The latest real Azure workflow remained in RETRY_WAIT with provider_unavailable; live Azure end-to-end proof remains pending. No bank transfer, external credit-note lifecycle or supplier/PO/GRN editor is implemented. Approval transactions deliberately serialize for this small monolith; append-only application history is not protection from a database administrator. Container images favor reproducibility over optimized size. Negative/credit arithmetic and undefined evidence are not silently converted into payment authorization.

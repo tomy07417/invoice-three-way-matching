@@ -1,0 +1,28 @@
+.review-workspace { max-width: 1600px; }
+.review-workspace h1, .review-workspace h2, .review-workspace h3 { overflow-wrap: anywhere; }
+.review-filters, .review-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1rem; align-items: end; }
+.review-filters { padding: 1rem; margin: 1rem 0; border: 1px solid #c8d3df; border-radius: .5rem; background: #f5f8fc; }
+.review-workspace label { display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
+.review-workspace input, .review-workspace select, .review-workspace textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.review-workspace textarea { min-height: 6rem; padding: .6rem; font: inherit; resize: vertical; border: 1px solid #a1b2c4; border-radius: .3rem; }
+.review-workspace fieldset { min-width: 0; border: 1px solid #c8d3df; padding: 1rem; margin: 1rem 0; }
+.review-workspace legend { font-weight: 650; padding: 0 .4rem; }
+.review-workspace .review-checkbox { flex-direction: row; align-items: center; }
+.review-checkbox input { width: auto; }
+.review-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1rem 0; }
+.review-document-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+.review-document-grid > section { min-width: 0; }
+.review-document { width: 100%; height: 580px; border: 1px solid #a1b2c4; margin-top: 1rem; background: white; }
+.review-workspace .table-scroll { max-width: 100%; overflow: auto; }
+.review-workspace table { min-width: 650px; }
+.review-workspace td, .review-workspace th { vertical-align: top; overflow-wrap: anywhere; max-width: 28rem; }
+.review-workspace caption { text-align: left; font-weight: 650; padding: .5rem 0; }
+.review-workspace .review-line { background: #f8fafc; }
+.review-history { padding-left: 1.5rem; }
+.review-history > li { padding: .7rem 0; border-bottom: 1px solid #d7e0e9; }
+.review-history pre { max-width: 100%; max-height: 28rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #f0f4f8; padding: .8rem; }
+@media (max-width: 850px) {
+  .review-document-grid { grid-template-columns: 1fr; }
+  .review-document { height: 400px; }
+  .review-filters, .review-form-grid { grid-template-columns: 1fr; }
+}
