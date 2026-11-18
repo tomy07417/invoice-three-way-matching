@@ -53,7 +53,14 @@ warnings to preserve uncertainty. Preserve original text, exact decimal values
 as strings and dates as YYYY-MM-DD; do not calculate missing totals. Preserve
 raw PO references; give resolved PO/line numbers only when unambiguous. Use
 unit_price_basis unknown unless explicitly evidenced. For non-invoices return
-is_invoice false and invoice null. Do not include any payment classification."""
+is_invoice false and invoice null. Do not include any payment classification.
+
+Return numeric values as strings with a dot as the decimal separator and no thousands/grouping separators.
+Use the visible document's consistent number formatting, not currency or supplier location, to distinguish separators.
+Examples: 980.10 -> "980.10"; 1,500.40 -> "1500.40"; 1,831.94 -> "1831.94"; 1.500,40 -> "1500.40".
+Remove grouping separators only; never change the magnitude, round or truncate decimal values.
+In particular, 1,831.94 must not become "1.83194".
+If separators remain ambiguous, return null for that field and a warning; do not guess or calculate missing totals."""
 
 
 def _retry_after(value):
