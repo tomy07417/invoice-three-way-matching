@@ -1,0 +1,49 @@
+.shared-table-region {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid #64748b;
+  border-radius: .35rem;
+}
+.shared-table-region table { width: 100%; border-collapse: collapse; }
+.shared-table-region th, .shared-table-region td { padding: .65rem; text-align: start; vertical-align: top; }
+.shared-table-region tr + tr { border-top: 1px solid #cbd5e1; }
+.shared-table-region caption { padding: .65rem; text-align: start; font-weight: 600; }
+.shared-table-region:focus-visible,
+.shared-filters :focus-visible,
+.shared-comment :focus-visible,
+.shared-document :focus-visible {
+  outline: 3px solid #1d4ed8;
+  outline-offset: 3px;
+}
+.shared-filters fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: .8rem;
+  min-width: 0;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid #64748b;
+}
+.shared-filters legend { font-weight: 600; padding: 0 .3rem; }
+.shared-status { display: inline-block; border: 1px solid currentColor; border-radius: .3rem; padding: .15rem .45rem; }
+.shared-status--neutral { color: #1e293b; background: #f1f5f9; }
+.shared-status--positive { color: #14532d; background: #f0fdf4; }
+.shared-status--warning { color: #713f12; background: #fefce8; }
+.shared-status--negative { color: #7f1d1d; background: #fef2f2; }
+.shared-evidence, .shared-document { border: 1px solid #64748b; padding: 1rem; margin-block: 1rem; overflow-wrap: anywhere; }
+.shared-evidence h3, .shared-document h3, .shared-timeline-event h3 { margin-top: 0; }
+.shared-timeline { padding-inline-start: 1.8rem; }
+.shared-timeline-event { padding: .8rem; margin-block: .75rem; border-inline-start: 3px solid #64748b; overflow-wrap: anywhere; }
+.shared-timeline-metadata { margin-bottom: .6rem; }
+.shared-comment { display: grid; gap: .5rem; margin-block: 1rem; }
+.shared-comment label { font-weight: 600; }
+.shared-comment p { margin: 0; }
+.shared-comment textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: .65rem; font: inherit; resize: vertical; }
+.shared-field-error { color: #991b1b; }
+.shared-document iframe { display: block; width: 100%; height: 36rem; margin-top: 1rem; border: 1px solid #64748b; }
+@media (max-width: 40rem) {
+  .shared-filters fieldset { flex-direction: column; align-items: stretch; }
+  .shared-filters input, .shared-filters select { box-sizing: border-box; max-width: 100%; }
+  .shared-document iframe { height: 24rem; }
+}
