@@ -9,6 +9,8 @@ import { displayValue, errorMessage, isActive, isCancelled } from '../../../lib/
 import { useSession } from '../../../components/intake/session-gate';
 import { usePolling } from '../../../components/intake/use-polling';
 import { InvoiceStatus, ReadFeedback } from '../../../components/intake/status';
+import { MoneyValue } from '../../../components/shared/format-value';
+import { OriginalDocument, TableRegion } from '../../../components/shared/workspace';
 
 const activeDetail = (invoice: InvoiceDetail) => isActive(invoice.processing_status);
 const HEADERS: [keyof Omit<InvoiceDraft, 'lines' | 'po_references'>, string][] = [
@@ -56,12 +58,12 @@ export default function InvoiceDetailPage() {
       </section>}
       {retryError && <p role="alert">{retryError}</p>}{retryMessage && <p role="status">{retryMessage}</p>}
       <section className="panel"><h2>Original document</h2><p>{invoice.document.file_name} — {invoice.document.media_type}, {invoice.document.byte_size} bytes, {invoice.document.page_count} page(s)</p>
-        <div className="actions"><a href={api.documentURL(id)} target="_blank" rel="noopener noreferrer">View original</a>
-          <a href={api.documentURL(id)} download={invoice.document.file_name}>Download original</a></div>
+        <OriginalDocument invoiceId={id} openLabel="View original" download={invoice.document.file_name} />
       </section>
       <section className="panel"><h2>Extracted headers</h2>
         {!draft ? <p>No extracted invoice fields are available yet.</p> : <dl>
-          {HEADERS.map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{displayValue(draft[key])}</dd></div>)}
+          {HEADERS.map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{['subtotal', 'tax_amount', 'total_amount'].includes(key)
+            ? <MoneyValue amount={draft[key]} currency={draft.currency} /> : displayValue(draft[key])}</dd></div>)}
           <dt>PO references</dt><dd>{draft.po_references?.length ? draft.po_references.join(', ') : '—'}</dd>
         </dl>}
       </section>
@@ -69,12 +71,12 @@ export default function InvoiceDetailPage() {
         {invoice.extraction?.warnings.length ? <ul>{invoice.extraction.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul> : <p>No warnings reported.</p>}
       </section>
       <section><h2>Extracted lines</h2>{!draft?.lines.length ? <p>No extracted lines available.</p> :
-        <div className="table-scroll" role="region" aria-label="Extracted invoice lines" tabIndex={0}><table><caption>Extracted lines — monetary values retain source precision</caption>
+        <TableRegion label="Extracted invoice lines"><table><caption>Extracted lines — monetary values retain source precision</caption>
           <thead><tr>{['Line', 'Description', 'Quantity', 'Unit price', 'Price basis', 'Line total', 'PO line reference', 'PO number', 'PO line number'].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
           <tbody>{draft.lines.map((line, index) => <tr key={index}><th scope="row">{index + 1}</th>
-            <td>{displayValue(line.description)}</td><td>{displayValue(line.quantity)}</td><td>{displayValue(line.unit_price)}</td><td>{line.unit_price_basis}</td>
-            <td>{displayValue(line.line_total)}</td><td>{displayValue(line.po_line_reference)}</td><td>{displayValue(line.po_number)}</td><td>{displayValue(line.po_line_number)}</td>
-          </tr>)}</tbody></table></div>}
+            <td>{displayValue(line.description)}</td><td>{displayValue(line.quantity)}</td><td><MoneyValue amount={line.unit_price} currency={draft.currency} /></td><td>{line.unit_price_basis}</td>
+            <td><MoneyValue amount={line.line_total} currency={draft.currency} /></td><td>{displayValue(line.po_line_reference)}</td><td>{displayValue(line.po_number)}</td><td>{displayValue(line.po_line_number)}</td>
+          </tr>)}</tbody></table></TableRegion>}
       </section>
       <section className="panel"><h2>Reasons and evidence</h2>
         <p>Technical state and automatic business outcome are separate. No payment or human decision is made here.</p>

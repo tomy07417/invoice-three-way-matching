@@ -1,4 +1,4 @@
-import type { InvoiceDraft, InvoiceLine } from './contracts';
+import type { InvoiceDraft, InvoiceLine, ReviewAction } from './contracts';
 
 export const REVIEW_STATES = ['REVIEW_REQUIRED', 'REEVALUATION_REQUIRED', 'ESCALATED', 'APPROVED', 'REJECTED', 'CREDIT_NOTE_REQUESTED'] as const;
 export const HEADER_LABELS = {
@@ -14,6 +14,14 @@ export const LINE_LABELS = {
 const decimalFields = new Set(['subtotal', 'tax_amount', 'total_amount', 'quantity', 'unit_price', 'line_total']);
 
 export function isAP(role: string): boolean { return role === 'ap_analyst' || role === 'ap_manager'; }
+export function decisionConfirmation(action: ReviewAction): string {
+  const messages: Record<ReviewAction, string> = {
+    approve: 'Confirm payment authorization against the current evidence? No bank payment will be executed.',
+    reject: 'Reject invoice with the recorded comment? The original automatic outcome remains unchanged.',
+    request_credit_note: 'Request credit note and block payment authorization? This records an operational hold, not a bank payment or supplier notification.',
+  };
+  return messages[action];
+}
 export function requiredReviewComment(value: string): string {
   if (!value.trim() || value.length > 4000) throw new Error('A nonblank comment of at most 4,000 characters is required.');
   return value.trim();

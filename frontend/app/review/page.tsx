@@ -8,6 +8,8 @@ import { displayValue } from '../../lib/intake-state';
 import { REVIEW_STATES } from '../../lib/review-state';
 import { usePolling } from '../../components/intake/use-polling';
 import { ReadFeedback } from '../../components/intake/status';
+import { MoneyValue, TimestampValue } from '../../components/shared/format-value';
+import { FilterForm, TableRegion } from '../../components/shared/workspace';
 
 const manualRefresh = (_page: ReviewQueuePage) => false;
 export default function ReviewQueue() {
@@ -28,7 +30,7 @@ export default function ReviewQueue() {
   }
   return <main className="review-workspace"><h1>AP review queue</h1>
     <p>Review held cases, compare evidence and track human decisions. Automatic outcomes do not execute payments.</p>
-    <form className="review-filters" onSubmit={filter}>
+    <FilterForm legend="Review queue filters" onSubmit={filter}>
       <label htmlFor="review-supplier">Supplier<input id="review-supplier" name="supplier" maxLength={200} /></label>
       <label>Invoice date from<input name="date_from" type="date" /></label>
       <label>Invoice date to<input name="date_to" type="date" /></label>
@@ -47,21 +49,21 @@ export default function ReviewQueue() {
       </select></label>
       <label>Direction<select name="direction"><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
       <button type="submit">Apply review filters</button>
-    </form>
+    </FilterForm>
     <button onClick={read.refresh} disabled={read.loading}>Refresh queue</button>
     <ReadFeedback loading={read.loading} error={read.error} paused={read.paused} refresh={read.refresh} />
-    {page && <><p>{page.total} matching cases</p><div className="table-scroll"><table><caption>AP cases and payment blocks</caption>
+    {page && <><p>{page.total} matching cases</p><TableRegion label="AP cases and payment blocks"><table><caption>AP cases and payment blocks</caption>
       <thead><tr><th>Invoice</th><th>Supplier / date</th><th>Amount</th><th>Automatic outcome</th><th>Operational state</th><th>Reasons</th><th>Age / receipt time</th></tr></thead>
       <tbody>{page.items.map(item => <tr key={item.invoice_id}>
         <td><Link href={`/review/${item.invoice_id}`}>{item.invoice_number ?? item.invoice_id}</Link></td>
         <td>{displayValue(item.supplier_name)}<br />{displayValue(item.invoice_date)}</td>
-        <td>{displayValue(item.total_amount)} {displayValue(item.currency)}</td>
+        <td><MoneyValue amount={item.total_amount} currency={item.currency} /></td>
         <td>{item.automatic_outcome ?? 'Incomplete — no final outcome'}</td>
         <td>{item.operational_state.replaceAll('_', ' ')}<br />{item.payment_blocked ? 'Payment blocked' : 'Payment authorized, not executed'}
           {item.requires_manager && <p>Manager required</p>}</td>
         <td><ul>{item.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul></td>
-        <td>{Math.floor(item.age_seconds / 86400)} days<br /><time>{item.created_at}</time></td>
-      </tr>)}</tbody></table></div>
+        <td>{Math.floor(item.age_seconds / 86400)} days<br /><TimestampValue value={item.created_at} /></td>
+      </tr>)}</tbody></table></TableRegion>
       {!page.items.length && <p role="status">No matching review cases. Change filters or refresh the queue.</p>}
       <nav aria-label="Review queue pages"><button disabled={read.loading || page.offset === 0}
         onClick={() => setOptions(value => ({ ...value, offset: Math.max(0, page.offset - page.limit) }))}>Previous review page</button>

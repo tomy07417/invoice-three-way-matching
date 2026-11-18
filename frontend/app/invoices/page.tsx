@@ -7,6 +7,8 @@ import type { InvoicePage, ProcessingState } from '../../lib/contracts';
 import { displayValue, isActive, outcomeLabel, PROCESSING_STATES } from '../../lib/intake-state';
 import { usePolling } from '../../components/intake/use-polling';
 import { ReadFeedback } from '../../components/intake/status';
+import { MoneyValue, TimestampValue } from '../../components/shared/format-value';
+import { TableRegion } from '../../components/shared/workspace';
 
 const hasActiveJobs = (page: InvoicePage) => page.items.some(invoice => isActive(invoice.processing_status));
 export default function InvoicesPage() {
@@ -24,7 +26,7 @@ export default function InvoicesPage() {
     {page && <>
       <p>{page.total} invoice{page.total === 1 ? '' : 's'}</p>
       {page.items.length === 0 ? <p>No invoices on this page. Choose another filter or upload a new invoice.</p> :
-        <div className="table-scroll" role="region" aria-label="Invoice list" tabIndex={0}>
+        <TableRegion label="Invoice list">
           <table><caption>Invoices — unknown draft values appear as —</caption><thead><tr>
             <th scope="col">Invoice number / ID</th><th scope="col">Supplier</th><th scope="col">Invoice date</th>
             <th scope="col">Total</th><th scope="col">Currency</th><th scope="col">Technical state</th>
@@ -32,10 +34,10 @@ export default function InvoicesPage() {
           </tr></thead><tbody>{page.items.map(invoice => <tr key={invoice.invoice_id}>
             <td><Link href={`/invoices/${invoice.invoice_id}`}>{displayValue(invoice.invoice_number)}<small>{invoice.invoice_id}</small></Link></td>
             <td>{displayValue(invoice.supplier_name)}</td><td>{displayValue(invoice.invoice_date)}</td>
-            <td>{displayValue(invoice.total_amount)}</td><td>{displayValue(invoice.currency)}</td>
-            <td>{invoice.processing_status}</td><td>{outcomeLabel(invoice.processing_status, invoice.automatic_outcome)}</td><td>{invoice.created_at}</td>
+            <td><MoneyValue amount={invoice.total_amount} currency={invoice.currency} /></td><td>{displayValue(invoice.currency)}</td>
+            <td>{invoice.processing_status}</td><td>{outcomeLabel(invoice.processing_status, invoice.automatic_outcome)}</td><td><TimestampValue value={invoice.created_at} /></td>
           </tr>)}</tbody></table>
-        </div>}
+        </TableRegion>}
       <nav aria-label="Invoice pagination" className="actions">
         <button disabled={offset === 0 || read.loading} onClick={() => setOffset(value => Math.max(0, value - 20))}>Previous</button>
         <span>Page {Math.floor(offset / 20) + 1}</span>

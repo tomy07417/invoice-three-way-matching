@@ -45,7 +45,7 @@ async function verify() {
     if (path.startsWith('/api/backend/')) requests.push({ path, method: request.method });
   });
   cdp.on('Page.javascriptDialogOpening', ({ message }) => {
-    const known = /^(Confirm payment authorization|Save correction, revoke|Reevaluation supersedes|Refresh discards)/.test(message);
+    const known = /^(Confirm payment authorization|Reject invoice|Request credit note|Save correction, revoke|Reevaluation supersedes|Refresh discards)/.test(message);
     if (!known) errors.push('Unexpected confirmation');
     void cdp.send('Page.handleJavaScriptDialog', { accept: known });
   });
@@ -111,7 +111,8 @@ async function verify() {
     .find(section => section.querySelector('h2')?.textContent === 'Invoice / PO / GRN comparison')
     .querySelectorAll('table tbody td:last-child li')).map(node => node.textContent)`);
   assert.deepEqual(renderedReasons, expectedReasons, 'Each row must show its exact readable non-PASS reasons');
-  assert.equal(await cdp.evaluate(`document.querySelector('iframe[title="Original invoice document"]')?.getAttribute('src')`), `/api/backend/invoices/${first}/document`);
+  stage = 'protected original frame contract';
+  assert.equal(await cdp.evaluate(`document.querySelector('iframe[title="Original invoice document"]')?.getAttribute('src')`), `/api/backend/invoices/${first}/document`, 'Original iframe title and authenticated source remain unchanged');
   pass('real Intake upload, AP-only queue, supplier filtering, exact per-row reasons and private original');
   if (focus === 'comparison') { assert.deepEqual(errors, []); return; }
 
