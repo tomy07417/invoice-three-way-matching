@@ -12,7 +12,7 @@ The three documents serve different purposes:
 | Purchase Order (PO) | What was ordered, from which supplier, and at what agreed price. |
 | Goods Received Note (GRN) | What was received; several GRNs can contribute to the received quantity of one PO line. |
 
-The intended workflow is to upload an invoice, extract structured fields with Azure OpenAI, retrieve the relevant reference data, and run deterministic Python checks. **The model extracts data; it does not decide payment outcomes.** The opt-in backend accepts private uploads, processes durable Azure extraction jobs and atomically persists deterministic evaluations when mandatory evidence is available. The Intake frontend and human-review workflows remain pending. See [durable processing setup and retry rules](docs/INVOICE_PROCESSING.md). Structured invoices can also be evaluated through the application use case below.
+The intended workflow is to upload an invoice, extract structured fields with Azure OpenAI, retrieve the relevant reference data, and run deterministic Python checks. **The model extracts data; it does not decide payment outcomes.** The opt-in backend accepts private uploads, processes durable Azure extraction jobs and atomically persists deterministic evaluations when mandatory evidence is available. The Intake frontend is implemented and undergoing acceptance verification; human-review workflows remain pending. See [Intake setup and limitations](docs/INVOICE_INTAKE.md) and [durable processing setup and retry rules](docs/INVOICE_PROCESSING.md). Structured invoices can also be evaluated through the application use case below.
 
 The matching engine evaluates resolved input data with this precedence:
 
@@ -26,13 +26,13 @@ Price tolerance defaults to **2% per line**, using exact Decimal arithmetic. The
 
 | Capability | Current state |
 | --- | --- |
-| Local stack | Next.js placeholder UI, FastAPI backend, PostgreSQL, and Docker Compose. |
+| Local stack | Next.js Intake routes, FastAPI backend, PostgreSQL, and Docker Compose. Intake acceptance verification remains in progress. |
 | Reference data | Domain entities, explicit migrations, and an atomic, repeatable JSON importer for suppliers, POs, and GRNs. |
 | PO inspection | Read-only HTTP endpoint with PO lines and received quantities aggregated across GRNs. |
-| Matching | Pure in-memory engine for confirmed matching policies, explicit historical/approval inputs, structured reasons and missing-evidence reporting; not connected to an API or the UI. |
-| Evaluation integration | Structured-input use case, consistent PostgreSQL context, versioned configuration, append-only evaluation/findings and evidence snapshots. No evaluation API/UI. |
+| Matching | Pure deterministic engine with explicit historical/approval inputs, structured reasons and missing-evidence reporting; invoked by durable processing. |
+| Evaluation integration | Structured-input use case, consistent PostgreSQL context, versioned configuration, append-only evaluation/findings and evidence snapshots; available through document detail. |
 | Extraction adapter | Async single-attempt Azure Responses adapter, strict nullable schema, exact Decimal/date parsing and sanitized retry classification; integrated with durable jobs. |
-| Invoice workflow | Opt-in authenticated upload/status/detail/private-document API, durable extraction and atomic evaluation linkage. Frontend, corrections, human review, approvals and payments remain unimplemented. |
+| Invoice workflow | Opt-in authenticated upload/status/detail/private-document API, durable extraction and atomic evaluation linkage. Intake login/list/upload/detail is under verification; corrections, human review, approvals and payments remain unimplemented. |
 
 The client has clarified the nine previously open business questions; [the PRD](docs/PRD.md#official-client-clarifications) records those requirements separately from the accepted design policies below. The clarified pure rules are implemented independently of operational integration. Approval transactions, human decisions, corrected-invoice versioning, credit-note requests and a user-facing reevaluation workflow remain future work. Explicit evaluation of unchanged input now appends audited evidence without replacing earlier results.
 
@@ -444,4 +444,4 @@ After Compose startup, check `docker compose ps`, `curl --fail http://127.0.0.1:
 
 ## Current limitations
 
-This is a local-demo backend, not a production deployment. Authenticated private uploads, durable extraction retries and deterministic evaluation integration are implemented; the Intake frontend, corrections, human decisions and audit views remain pending. PostgreSQL-backed integration tests passed, but the latest real Azure workflow remained in RETRY_WAIT with provider_unavailable, so full live end-to-end verification is still pending. Container images favor a simple reproducible scaffold over optimized size. The official business answers are implemented in pure matching rules; undefined arithmetic and approval-limit policies are not silently invented.
+This is a local-demo backend, not a production deployment. Authenticated private uploads, durable extraction retries and deterministic evaluation integration are implemented; the Intake frontend is under acceptance verification; corrections, human decisions and audit views remain pending. PostgreSQL-backed integration tests passed, but the latest real Azure workflow remained in RETRY_WAIT with provider_unavailable, so full live end-to-end verification is still pending. Container images favor a simple reproducible scaffold over optimized size. The official business answers are implemented in pure matching rules; undefined arithmetic and approval-limit policies are not silently invented.
