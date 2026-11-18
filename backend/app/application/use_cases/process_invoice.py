@@ -42,7 +42,7 @@ class _BorrowedTransaction:
         yield self.value
 
 
-def evaluate_draft(transaction, job, clock):
+def evaluate_draft(transaction, job, clock, *, origin='document-extraction'):
     result = job.extraction
     draft = result.invoice if result and result.is_invoice else None
     if draft is None:
@@ -77,7 +77,7 @@ def evaluate_draft(transaction, job, clock):
             net_prices[index] = line.unit_price
     command = EvaluateInvoiceCommand(invoice, str(job.owner_id), supplier_id=supplier_id,
                                     associations=associations, net_unit_prices=net_prices,
-                                    origin='document-extraction')
+                                    origin=origin)
     record = EvaluateInvoiceUseCase(_BorrowedTransaction(transaction), clock=clock).execute(command)
     return record.invoice_id, record.evaluation_id, record.result.complete
 
