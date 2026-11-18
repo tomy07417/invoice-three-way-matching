@@ -1,0 +1,21 @@
+.manager-workspace { max-width: 1280px; margin: 0 auto; padding: 1rem; }
+.manager-workspace nav, .manager-workspace .manager-actions { display: flex; gap: .8rem; flex-wrap: wrap; align-items: center; }
+.manager-workspace main { padding: 1rem 0; }
+.manager-workspace section, .manager-workspace .manager-links li { border: 1px solid #a4afbd; border-radius: .5rem; padding: 1rem; margin: 1rem 0; background: #fff; color: #172333; }
+.manager-workspace h1, .manager-workspace h2, .manager-workspace h3 { overflow-wrap: anywhere; }
+.manager-workspace label { display: block; margin: 1rem 0; font-weight: 600; }
+.manager-workspace input, .manager-workspace textarea { display: block; width: 100%; max-width: 42rem; box-sizing: border-box; margin-top: .35rem; padding: .65rem; color: #172333; background: white; border: 1px solid #637185; border-radius: .25rem; }
+.manager-workspace textarea { min-height: 6rem; }
+.manager-workspace button { min-height: 2.75rem; padding: .5rem .8rem; }
+.manager-workspace :is(a, button, input, textarea, summary):focus-visible { outline: 3px solid #145dc2; outline-offset: 3px; }
+.manager-workspace [aria-invalid="true"] { border: 2px solid #a01818; }
+.manager-workspace .manager-error { color: #8e1818; font-weight: 600; }
+.manager-workspace .manager-warning { padding: .8rem; border-left: .3rem solid #865c00; background: #fff5d5; color: #352600; }
+.manager-workspace .manager-table { overflow-x: auto; }
+.manager-workspace table { width: 100%; border-collapse: collapse; }
+.manager-workspace th, .manager-workspace td { text-align: left; vertical-align: top; padding: .65rem; border-bottom: 1px solid #b8c0ca; overflow-wrap: anywhere; }
+.manager-workspace dd { margin: .3rem 0 1rem; overflow-wrap: anywhere; }
+.manager-workspace dt { font-weight: 600; }
+.manager-workspace pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.manager-workspace .manager-links { list-style: none; padding: 0; }
+@media (max-width: 640px) { .manager-workspace { padding: .7rem; } .manager-workspace nav { align-items: stretch; } .manager-workspace nav a { padding: .4rem; } .manager-workspace th, .manager-workspace td { min-width: 9rem; } }
