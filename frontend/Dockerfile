@@ -7,6 +7,8 @@ COPY frontend/package.json ./frontend/package.json
 RUN pnpm install --frozen-lockfile
 COPY frontend/tsconfig.json frontend/next-env.d.ts ./frontend/
 COPY frontend/app ./frontend/app
+COPY frontend/lib ./frontend/lib
+COPY frontend/components ./frontend/components
 RUN pnpm --filter frontend build && chown -R node:node /app
 USER node
 EXPOSE 3000

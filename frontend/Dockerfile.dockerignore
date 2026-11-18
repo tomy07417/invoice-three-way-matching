@@ -8,3 +8,7 @@
 !frontend/next-env.d.ts
 !frontend/app/
 !frontend/app/**
+!frontend/lib/
+!frontend/lib/**
+!frontend/components/
+!frontend/components/**
