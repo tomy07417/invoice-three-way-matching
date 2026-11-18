@@ -13,18 +13,20 @@ export async function stopChild(child) {
   });
 }
 
-export async function launchChrome() {
+export async function launchChrome({ removeProfile = rm } = {}) {
   const profile = await mkdtemp(join(tmpdir(), 'intake-chrome-'));
   const child = spawn('/usr/bin/google-chrome', [
     '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run',
     '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
   let client;
-  const close = async () => {
+  let closing;
+  const close = () => closing ??= (async () => {
     client?.close();
     await stopChild(child);
-    await rm(profile, { recursive: true, force: true });
-  };
+    // Chrome descendants can briefly finish profile writes after the parent exits.
+    await removeProfile(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  })();
   try {
     const endpoint = await new Promise((resolve, reject) => {
       let output = '';

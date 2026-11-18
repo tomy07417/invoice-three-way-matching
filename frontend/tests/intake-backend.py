@@ -43,17 +43,26 @@ from app.main import create_app
 
 
 class ControlledExtractor:
-    def __init__(self):
+    def __init__(self, *, review=False):
         self.count = 0
+        self.review = review
 
     async def extract(self, document):
         self.count += 1
         number = self.count
-        await asyncio.sleep(8 if number == 1 else 0.1)
+        await asyncio.sleep(8 if number == 1 and not self.review else 0.1)
+        quantity = Decimal('2') if self.review else Decimal('6')
+        price = Decimal('12.000000') if self.review else Decimal('10.000000')
+        currency = 'USD'
+        if self.review and document.metadata.file_name == 'manager.png':
+            quantity, price = Decimal('1'), Decimal('5001.000000')
+        if self.review and document.metadata.file_name == 'eur.png':
+            quantity, price, currency = Decimal('1'), Decimal('1.000000'), 'EUR'
+        total = quantity * price
         draft = InvoiceDraft(
             'Browser Supplier', 'browser-tax', f'BROWSER-{number}', date(2026, 10, 2), None,
-            ('PO-BROWSER',), 'USD', Decimal('60.000000'), Decimal('0.000000'), Decimal('60.000000'),
-            (InvoiceLineDraft('Browser item', Decimal('6'), Decimal('10.000000'), Decimal('60.000000'),
+            ('PO-BROWSER',), currency, total, Decimal('0.000000'), total,
+            (InvoiceLineDraft('Browser item', quantity, price, total,
                               '3', 'PO-BROWSER', 3, 'net'),))
         return ExtractionResult(True, draft, ('Controlled extraction warning.',), TokenUsage(10, 10))
 
@@ -94,8 +103,12 @@ def main():
                               (GoodsReceivedNoteLine(3, Decimal('5')),)),))
         import_reference_data(reference, SqlReferenceDataRepository(engine))
         sessions = SessionService(SqlAuthRepository(engine))
-        for username in ('browser_owner', 'browser_other'):
-            sessions.provision(username, 'browser test password', Role.INTAKE)
+        review_mode = os.environ.get('AP_REVIEW_FIXTURE') == '1'
+        accounts = [('browser_owner', Role.INTAKE), ('browser_other', Role.INTAKE)]
+        if review_mode:
+            accounts.extend([('browser_analyst', Role.AP_ANALYST), ('browser_manager', Role.AP_MANAGER)])
+        for username, role in accounts:
+            sessions.provision(username, 'browser test password', role)
         with TemporaryDirectory(prefix='intake-fixture-') as scratch:
             png = Path(scratch) / 'invoice.png'
             Image.new('RGB', (16, 16), color='white').save(png, format='PNG')
@@ -104,7 +117,7 @@ def main():
             storage = LocalDocumentStorage(Path(scratch) / 'private')
             service = InvoiceService(sessions, repository, LocalDocumentValidator(), storage,
                                      offload=offload, estimated_tokens=100)
-            worker = ProcessInvoice(repository, storage, ControlledExtractor(), offload=offload)
+            worker = ProcessInvoice(repository, storage, ControlledExtractor(review=review_mode), offload=offload)
             application = create_app(invoice_service=service, processing_enabled=False)
 
             @asynccontextmanager
