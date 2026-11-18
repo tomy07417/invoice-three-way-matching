@@ -1,7 +1,8 @@
 """Controlled-provider browser fixture. Never imports Azure or uses an application DB.
 
-Run only through intake-browser.mjs. TEST_DATABASE_URL must explicitly identify a
-local test_ database; a unique database and private directory are owned here.
+Run through the browser acceptance scripts or the explicitly isolated README demo.
+TEST_DATABASE_URL must identify a local test_ database; a unique database and
+private directory are owned here. Extraction is synthetic and filename-driven.
 """
 import asyncio
 from contextlib import asynccontextmanager
@@ -29,6 +30,7 @@ from app.application.dtos.auth import Role
 from app.application.dtos.invoice_documents import ExtractionResult, InvoiceDraft, InvoiceLineDraft, TokenUsage
 from app.application.dtos.processing import ProcessingConfig
 from app.application.dtos.reference_data import ReferenceData
+from app.application.ports.invoice_documents import ExtractionError
 from app.application.use_cases.import_reference_data import import_reference_data
 from app.application.use_cases.process_invoice import BoundedOffload, ProcessInvoice
 from app.application.use_cases.sessions import SessionService
@@ -50,6 +52,9 @@ class ControlledExtractor:
     async def extract(self, document):
         self.count += 1
         number = self.count
+        if document.metadata.file_name == 'rate-limited.png':
+            raise ExtractionError('rate_limited', 'Controlled provider rate limit (simulated Azure 429).',
+                                  retryable=True, retry_after=120)
         await asyncio.sleep(8 if number == 1 and not self.review else 0.1)
         quantity = Decimal('2') if self.review else Decimal('6')
         price = Decimal('12.000000') if self.review else Decimal('10.000000')

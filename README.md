@@ -26,7 +26,7 @@ Price tolerance defaults to **2% per line**, using exact Decimal arithmetic. The
 
 | Capability | Current state |
 | --- | --- |
-| Local stack | Next.js Intake/AP routes, FastAPI backend, PostgreSQL, and Docker Compose. Real browser acceptance uses an isolated database and controlled extractor. |
+| Local stack | Next.js Intake/AP/Manager/Audit routes, FastAPI backend, PostgreSQL, and Docker Compose. Real browser acceptance uses an isolated database and controlled extractor. |
 | Reference data | Domain entities, explicit migrations, and an atomic, repeatable JSON importer for suppliers, POs, and GRNs. |
 | PO inspection | Read-only HTTP endpoint with PO lines and received quantities aggregated across GRNs. |
 | Matching | Pure deterministic engine with explicit historical/approval inputs, structured reasons and missing-evidence reporting; invoked by durable processing. |
@@ -344,7 +344,7 @@ AP Analyst and Manager accounts can open **AP review** in the navigation or visi
 
 The detail pairs the private original with original/current extracted headers and evaluation-time PO/GRN evidence. **Correct extraction** opens nullable header/line fields and explicit PO-local associations. Decimal inputs remain strings; blank fields mean unknown, while an empty known PO list means none. Enter a reason, preview changed fields, then confirm the correction. This revokes existing authorization with audit; enter a new comment and select **Reevaluate** before making a new decision. Reevaluation also supersedes the current decision and never calls Azure.
 
-Approval, rejection, credit-note requests and Manager escalation require comments. Controls reflect server eligibility rather than browser amount arithmetic. A stale version or uncertain mutation pauses actions until **Refresh case**; mutations are not automatically replayed. History distinguishes current versions/decisions from historical evaluations, decisions and compensating reversals.
+Approval, rejection, credit-note requests and Manager escalation require comments. Approval, rejection and credit-note requests also require explicit confirmation before a mutation is sent; cancelling retains the comment and changes no revision or audit. Controls reflect server eligibility rather than browser amount arithmetic. A stale version or uncertain mutation pauses actions until **Refresh case**; mutations are not automatically replayed. History distinguishes current versions/decisions from historical evaluations, decisions and compensating reversals.
 
 Observed self-verification: **599 backend tests**, no skips, against isolated PostgreSQL; **31 frontend tests on Node 24**, TypeScript and production build; real Chrome AP acceptance plus unchanged Intake regression. Independent backend verification passed 156 focused tests and two additional quantity/receipt probes, now retained as regression tests and separately passed by the parent. It found a comparison-row rendering defect: focused actual Chrome reproduced RED, then passed after the type/render correction and a fresh Node24 build. One targeted independent contract inspection confirmed that original blocker resolved, with browser evidence explicitly attributed to the parent. Its optional frontend test/typecheck attempt remained unavailable because scratch dependency links lacked the pnpm store. A third supplemental probe observed one approval/correction winner (200/409) before its own stale-CSRF fixture failed; remaining probe assertions were not executed. No independent frontend execution or native approval is claimed. These checks use a controlled extractor and make no Azure or banking calls.
 
@@ -362,7 +362,7 @@ Use the existing opt-in processing setup and run `alembic upgrade head` before s
 
 All routes require an AP session; mutations additionally require the existing CSRF header and `If-Match` containing the quoted revision returned by the detail/history ETag (for example `"0"`). Missing revisions return 428; stale edits/decisions return 409 without new audit or consumption. Refresh and review current evidence instead of blindly retrying an uncertain mutation.
 
-Analyst may approve up to **5,000 USD inclusive**. Above that amount or in another currency, Manager is required; no FX occurs. Approval additionally requires complete current evidence, reliable positive PO-line quantities/net prices, no active same-supplier normalized-number authorization, and sufficient currently received/unconsumed quantities. An override does not invent missing evidence or receipts. A rejected case consumes nothing. Credit-note requests retain their operational payment block across reevaluation; the external resolution workflow is out of scope.
+The initial Analyst approval limit is **5,000 USD inclusive**. Eligibility uses the limit captured by the case's current evaluation, not a later parameter edit. Above that evaluated limit or in another currency, Manager is required; no FX occurs. Approval additionally requires complete current evidence, reliable positive PO-line quantities/net prices, no active same-supplier normalized-number authorization, and sufficient currently received/unconsumed quantities. An override does not invent missing evidence or receipts. A rejected case consumes nothing. Credit-note requests retain their operational payment block across reevaluation; the external resolution workflow is out of scope.
 
 A relevant correction revokes the prior authorization and releases its consumption with an append-only audited reversal. The original decision, raw versions and automatic results remain historical evidence. Reevaluation does not rerun extraction. Original Intake endpoints retain the original document/extraction/evaluation; use the AP detail/history for the versioned review state.
 
@@ -388,6 +388,130 @@ node frontend/tests/intake-browser.mjs
 ```
 
 The host CDP tooling may use the installed Node runtime; the application build/server and transport test evidence above used the declared Node 24. The earlier acceptance attempt passed AP flows but failed profile cleanup (`ENOTEMPTY`); after a focused RED/GREEN cleanup fix, the final AP+Intake command exited 0. This is not independent security certification. Documents are verified via private links/bytes, not a saved download artifact.
+
+## Manager administration and invoice audit (PRD04)
+
+AP Managers can open `/manager/parameters`, `/manager/escalations` and `/audit`. Intake and Analyst accounts cannot access the new administration/audit APIs; their existing authorized Intake/AP views are unchanged. Guards and navigation are presentation only: every backend request resolves the persisted session role independently.
+
+### Parameters and escalation
+
+Run `alembic upgrade head`: additive migration `0006` records parameter changes without rewriting invoices, evaluations or approval facts. Price tolerance starts at **2%** and the Analyst limit at **USD 5,000**. Both accept finite, nonnegative exact decimals without an application business maximum, fixed scale or rounding; database numeric capacity and transport limits still apply. The form displays tolerance as a percentage; the API uses its fractional string (`"0.02"`). Comments on parameter changes are optional.
+
+Review the future-only explanation and confirm before saving. A change affects new evaluations and explicit reevaluations only; earlier results and evaluated approval-limit snapshots remain historical evidence. The history shows before/after values, version, recorded actor/time and provenance. An unchanged submission still checks the expected version, but retains that version and creates no audit event or comment. Conflicting or uncertain saves preserve the draft and pause editing until an explicit refresh; they are never blindly replayed.
+
+The escalation queue includes **all automatic outcomes**, not only Held for Review. Select a case to inspect its recorded Analyst comments and evidence, then open the existing AP resolution screen. Approval/rejection still require a comment, confirmation, CSRF and current case revision. No client-side eligibility arithmetic or new payment mechanism is introduced.
+
+| Endpoint | Contract |
+| --- | --- |
+| `GET /manager/parameters` | Current exact values, version, effective time and recorded actor; quoted version ETag. |
+| `PATCH /manager/parameters` | At least one of `price_tolerance` / `analyst_approval_limit` as a decimal string, optional `comment`, CSRF and quoted version `If-Match`. Missing version: 428; stale version: 409 without a write. |
+| `GET /manager/parameters/history` | `offset` / `limit` pagination and truthful before/after provenance. |
+| `GET /audit/{invoice_id}` | Manager-only read projection; `offset`, `limit` (1–100), `kind`, `actor_id`, inclusive timezone-aware `time_from` / `time_to`. |
+
+### Truthful audit and reproduction
+
+The audit timeline separates recorded facts from derived differences/state transitions, current applicability from historical events, and automatic evidence from human decisions. Missing historical times/identities remain **not recorded**; upload time/owner must not impersonate extraction time/actor. A missing prior value is distinguished from a recorded null. Filters use recorded metadata; an event without a recorded time cannot match a time range. Protected originals remain behind the existing authenticated AP view, never permanent public URLs.
+
+Use the same isolated PostgreSQL/loopback frontend setup described under [AP acceptance](#reproduce-ap-acceptance), with a current Node 24 production build. Run the scripts separately because each owns backend port 3211 and its disposable database:
+
+```sh
+node --test frontend/tests/manager-transport.test.mjs frontend/tests/manager-state.test.mjs frontend/tests/audit-state.test.mjs frontend/tests/decision-confirmation.test.mjs
+node frontend/tests/manager-browser.mjs
+```
+
+Observed PRD04 integration proof: main composition tests passed; Manager/Audit transport, exact-value helpers and TypeScript passed; a fresh Node 24 build and actual Chrome acceptance passed against controlled extraction and isolated PostgreSQL. Chrome checked negative roles, exact parameter persistence/no-op, invalid/stale writes leaving version/audit unchanged, retained drafts, escalation/approval above the evaluated limit, audit state differences/provenance/filters, and cancelled/confirmed rejection. The first browser script failed on expression escaping; a later run found the missing rejection confirmation and passed after its correction. Docker context/name-reuse setup failures are not functional test passes. PRD05 full regression, broader accessibility/demo proof and the final independent verifier remain pending; native assessment is unassessable for the current untracked scope, not approval. No live Azure or banking outcome is claimed.
+
+## Integrated frontend quality (PRD05 — verification in progress)
+
+The central HTTP client validates nested Session, Intake and AP success payloads before components use them, including XHR upload responses. Invalid wire shapes fail with a sanitized `invalid_response`, correlation identifier and retry guidance. Legitimate unknown fields, pending technical states, historical versions and exact Decimal strings remain distinct; validation does not reproduce matching, approval policy or currency conversion. Unexpected JSON error `detail` strings are not echoed; recognized public session failures and the explicit public error envelope retain their contract.
+
+All workspaces share accessible table regions, filters, timeline, evidence/status displays, controlled comment feedback, native confirmation and authenticated original-document access. Required decision comments receive inline errors and keyboard focus before any mutation. Existing CSRF/version/idempotency controls, draft retention and bounded polling remain authoritative. The original viewer only accepts an invoice UUID and derives a same-origin authenticated stream; it does not accept arbitrary URLs or HTML. Sandboxed preview support varies by browser; protected open/download links remain available.
+
+Money display localizes separators without converting amounts to JavaScript numbers, rounding fractional digits, inventing USD or performing FX. Exact originals remain available alongside the localized presentation. Scientific notation expands only within a **1,000-digit rendering budget**; larger values retain their complete original notation and recorded currency. This is a presentation budget, not a business limit. Timestamps show a local timezone only after hydration, retaining their recorded instant; missing/invalid metadata never falls back to the current time. Date-only invoice fields remain calendar dates.
+
+```sh
+node --test frontend/tests/*.test.mjs
+pnpm --filter frontend typecheck
+pnpm --filter frontend build
+```
+
+Observed self-checks: 104 native frontend tests and TypeScript passed; the corrected Node 24 production build passed. Actual Chrome then passed Manager/Audit, AP and Intake together against controlled extraction and isolated PostgreSQL. This includes inline comment focus/no-write validation, the preserved private original viewer, correction/release/reevaluation, credit-note blocks, stale conflicts, mobile/keyboard checks and real session expiry. Earlier runs exposed a missing inline comment attachment and a changed iframe title; both were corrected and rechecked. The HTTP network/error matrix remains explicitly CDP-simulated. A separate controlled provider rate-limit scenario now passed through the real durable backend and UI: one attempt, `RETRY_WAIT`, a 120-second retry floor, no extraction/evaluation/final outcome and unchanged scheduling evidence after confirming an existing retry. Manager/Audit mobile bounds, labels, visible keyboard focus and sampled heading contrast also passed. These are self-checks, not a formal accessibility audit. Full backend regression passed (636 tests), as did the Node 24 native frontend suite (103 tests, with the host-Chrome cleanup test verified separately) and the baseline differential checks. The independent verifier found no application/security/data blocker and passed its functional checks, but reported a browser-fixture environment-isolation exception. With explicit owner authorization, the runner was corrected to forward only the isolation `HOME`/`TMPDIR` alongside its existing allowlist. A targeted process/Python check observed RED before the fix and GREEN afterward, including private-file allocation and cleanup inside the requested temporary root and exclusion of application credentials. The full verifier was not rerun; its original exception remains part of the evidence. No native approval, live Azure proof or permission to deploy is implied.
+
+## Reproducible controlled demo and release checklist
+
+### Isolated setup — no Azure or application-data reset
+
+Use Node 24, installed workspace/backend dependencies and the existing PostgreSQL 17 image. Reserve loopback ports **55472** (test PostgreSQL), **3211** (fixture API) and **3212** (frontend). Reuse an existing owned test service if present; never stop an unrelated service or point this fixture at application data. If a disposable database service is needed:
+
+```sh
+# Synthetic credentials for this throwaway local fixture only; never reuse them.
+docker run --detach --rm --name invoice-demo-postgres \
+  -p 127.0.0.1:55472:5432 -e POSTGRES_USER=test \
+  -e POSTGRES_PASSWORD=test_only -e POSTGRES_DB=test_ap_review postgres:17-bookworm
+docker exec invoice-demo-postgres pg_isready -U test -d test_ap_review
+```
+
+Wait for database readiness before starting the fixture. In terminal A:
+
+```sh
+export TEST_DATABASE_URL='postgresql+psycopg://test:test_only@127.0.0.1:55472/test_ap_review'
+AP_REVIEW_FIXTURE=1 PYTHONDONTWRITEBYTECODE=1 \
+  backend/.venv/bin/python frontend/tests/intake-backend.py
+```
+
+The fixture refuses non-loopback/non-test URLs, creates its own uniquely named database, migrates it, imports synthetic supplier/PO/GRN data and stores originals in its own private temporary directory. Wait for both `INTAKE_FIXTURE` and the listening message. The first message identifies a generated valid PNG for uploads; it contains no real invoice. In terminal B, use the declared Node version to build/start the frontend:
+
+```sh
+pnpm --filter frontend build
+BACKEND_INTERNAL_URL=http://127.0.0.1:3211 \
+FRONTEND_ORIGIN=http://127.0.0.1:3212 \
+  pnpm --filter frontend exec next start --hostname 127.0.0.1 --port 3212
+```
+
+Alternatively, build `frontend/Dockerfile` with the **repository root** as Docker context, then use the already-tested Linux host-network configuration above. Do not place either proxy variable behind a `NEXT_PUBLIC_` prefix. Open `http://127.0.0.1:3212/login`.
+
+| Synthetic account | Capability |
+| --- | --- |
+| `browser_owner` | Intake uploads and owned-case tracking. |
+| `browser_other` | Separate Intake owner for negative visibility checks. |
+| `browser_analyst` | AP review, correction, reevaluation, allowed decisions and escalation. |
+| `browser_manager` | AP capabilities, above-limit decisions, parameters and complete audit. |
+
+The deliberately public fixture password is `browser test password`; these accounts exist only in the disposable fixture. This is not production-user provisioning.
+
+### Demo path and safe reset
+
+This extractor is intentionally **filename-driven**, not an Azure/model accuracy demonstration. Upload the generated PNG, keeping or changing only its upload filename:
+
+1. **Held case:** a normal filename produces quantity 2 at net price 12 USD against a PO price of 10. Inspect the deterministic reason and original evidence.
+2. **Correction:** as Analyst, change unit price to 10, line total/subtotal/total to 20, enter a reason, preview and confirm. Reevaluate to inspect Auto-Pay; authorization remains separate from a bank payment.
+3. **Escalation:** `manager.png` produces USD 5,001. Request Manager review with a comment, inspect the recorded Analyst reason as Manager, then confirm the decision. Parameter edits demonstrate future-only versions, exact values, optional comments and stale recovery.
+4. **Credit note:** use another undecided held case, request a credit note with confirmation/comment, reevaluate and verify the payment block persists.
+5. **Rate limit:** `rate-limited.png` produces a **simulated provider 429** via the existing extractor error contract. The real worker records `RETRY_WAIT` with at least 120 seconds before eligibility, no final business result and no reset from **Confirm scheduled retry**. Later retries/exhaustion follow the existing policy; the fixture is not pinned forever to one status.
+6. **Audit and boundaries:** inspect recorded/derived provenance and before/after values; check Intake/Analyst denial of administration, separate ownership, keyboard/mobile use and session-expiry return paths.
+
+Stop the fixture with **Ctrl-C** to cancel its worker and remove only its uniquely owned database/private temporary files. Restarting creates fresh demo data; log in again. Stop only the frontend/database containers you created for this demo. No global reset/drop command is provided. An ungraceful SIGKILL can leave an orphan: inspect the exact recorded fixture resource and obtain operator authorization before manual removal; never delete databases by a broad name pattern.
+
+For automated acceptance, stop the interactive fixture first: each script owns API port 3211 and creates/drops its own database. Keep the frontend running and the explicit test URL exported, then run separately:
+
+```sh
+PYTHONPATH=backend backend/.venv/bin/python -m pytest -q frontend/tests/test_controlled_provider.py
+node frontend/tests/manager-browser.mjs
+node frontend/tests/review-browser.mjs
+node frontend/tests/intake-browser.mjs
+```
+
+### Pre-demo and release gates
+
+- **Identity and health:** verify the authenticated frontend URL, safe return paths and API `/health`; liveness alone is not database/provider readiness. Exercise an authorized list and protected original.
+- **Data and schema:** confirm reference-data import and migrations through `0006`; verify Manager parameters and evaluated snapshots. Keep application data separate from the disposable fixture.
+- **Secrets and logs:** server-only Azure credentials/backend origin, no session tokens/document contents in screenshots or logs; inspect only sanitized errors and correlation identifiers. The controlled fixture needs no Azure credentials.
+- **TLS/session policy:** before any real deployment, review HTTPS, persisted role provisioning, CSRF/origin settings, authorized document storage and `SESSION_SECURE_COOKIE=1`. `FRONTEND_ORIGIN` must be the trusted public frontend origin; forwarded host headers are not authority.
+- **Provider fallback:** keep this controlled demo available when Azure throttles/unavailable, clearly label it synthetic and retain the separate live-Azure gap. Do not present its results as model/provider proof.
+- **Release:** run relevant tests/build/browser and independent verification, review the atomic local commits and secure-environment configuration. Tagging, pushing, deploying or publishing require separate owner authorization; no environment is certified here.
+- **Rollback:** prefer the previous application artifact, preserving immutable audit/approval facts. Configuration reversion is another future-only audited Manager version. Do not delete history or downgrade a database to undo a UI change; restoration/migration actions need an explicit operator plan and backups.
+
+Observed demo checks: five controlled-extractor contract tests and actual expanded Manager/Audit Chrome acceptance passed, including the real backend retry evidence and basic mobile/accessibility checks. Full backend regression (636 tests), the Node 24 native suite (103 tests plus separately verified host-Chrome cleanup) and baseline differential checks passed. Independent functional verification passed. Its recorded browser-fixture isolation exception was followed by an owner-authorized narrow correction and targeted RED/GREEN process/Python proof, not a repetition of the full verifier. To check that boundary alone, run `CHECK_MANAGER_PYTHON_ISOLATION=1 node --test frontend/tests/manager-runner-isolation.test.mjs`; it starts no API, database, Chrome or provider. No native approval or live Azure success is claimed.
 
 ## Decision log
 
@@ -502,6 +626,14 @@ Decisions D1–D15 record earlier implementation milestones. References to defer
 ### D17 — Audited release when an approved case is corrected
 
 **Owner decision:** A relevant correction revokes the prior payment authorization and releases consumed quantities with a traceable reversal. Previous decisions and evaluations are not deleted. Payment remains blocked until reevaluation and a new approval. No banking payment has been executed by this application. Pending credit-note requests remain explicit payment blocks; their external resolution is not implemented.
+
+### D18 — Exact, future-only Manager parameters
+
+**Owner decision:** Preserve finite nonnegative tolerance and USD Analyst limit, without added maxima or fixed decimal scale. Versioned Manager edits are audited atomically and select future evaluations/reevaluations only. Historical evaluation and approval-limit snapshots are not rewritten. Unchanged values still perform the version check without creating a new version/audit comment.
+
+### D19 — Honest historical audit provenance
+
+**Design:** Project existing recorded evidence read-only. Keep absent historical actor/time explicit; label derived differences and state transitions instead of manufacturing a past author or extraction timestamp. Full audit administration is Manager-only while existing Analyst case history remains authorized.
 
 ## Current limitations
 
