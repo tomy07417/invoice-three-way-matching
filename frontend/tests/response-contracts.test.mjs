@@ -81,6 +81,16 @@ test('accounting evidence roundtrips while malformed adjustment amounts are reje
   value.extraction.accounting_evidence.adjustments[0].amount = 10;
   await assert.rejects(api.reviewDetail(id), error => error instanceof ApiError && error.code === 'invalid_response');
 });
+test('effective basis metadata is optional for history and validated when present', async t => {
+  const { api, ApiError } = await loadTypeScript('../lib/api.ts');
+  const value = clone(review);
+  Object.assign(value.comparison_rows[0], { declared_unit_price_basis: 'unknown',
+    effective_unit_price_basis: 'net', unit_price_basis_source: 'arithmetic', price_basis_reason: 'accounting_reconciled' });
+  t.mock.method(globalThis, 'fetch', async () => Response.json(value));
+  assert.deepEqual(await api.reviewDetail(id), value);
+  value.comparison_rows[0].unit_price_basis_source = 'guessed';
+  await assert.rejects(api.reviewDetail(id), error => error instanceof ApiError && error.code === 'invalid_response');
+});
 const invalidCases = [
   ['currentSession', 'unknown role', v => { v.actor.role = 'admin'; }],
   ['login', 'nested actor type', v => { v.actor.actor_id = '1'; }],

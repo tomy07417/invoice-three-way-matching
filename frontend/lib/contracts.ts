@@ -146,6 +146,10 @@ export interface ComparisonRow {
   po_net_unit_price: DecimalString | null; invoice_net_unit_price: DecimalString | null;
   invoice_currency: string | null; po_currency: string | null; tolerance: DecimalString | null;
   association_status: 'explicit' | 'unresolved'; findings: ComparisonFinding[];
+  declared_unit_price_basis?: 'net' | 'gross' | 'unknown';
+  effective_unit_price_basis?: 'net' | 'gross' | 'unknown';
+  unit_price_basis_source?: 'declared' | 'arithmetic' | 'undetermined';
+  price_basis_reason?: string;
 }
 export interface ReviewDetail {
   invoice_id: string; revision: number; extraction_version: number;

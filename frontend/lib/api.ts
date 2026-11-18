@@ -117,12 +117,21 @@ const processingDetail: ResponseGuard = value => record(value) && processingSnap
     && integer(attempt.reserved_tokens) && nullableInteger(attempt.reported_tokens) && nullableString(attempt.error_code))
   && Array.isArray(value.events) && value.events.every(event => record(event) && typeof event.at === 'string'
     && processingState(event.state) && nullableString(event.error_code));
+const priceBasisMetadata: ResponseGuard = value => record(value)
+  && (['declared_unit_price_basis', 'effective_unit_price_basis', 'unit_price_basis_source', 'price_basis_reason']
+    .every(key => value[key] === undefined)
+    || ['declared_unit_price_basis', 'effective_unit_price_basis'].every(key => typeof value[key] === 'string'
+      && ['net', 'gross', 'unknown'].includes(value[key] as string))
+      && typeof value.unit_price_basis_source === 'string'
+      && ['declared', 'arithmetic', 'undetermined'].includes(value.unit_price_basis_source)
+      && typeof value.price_basis_reason === 'string');
 const comparisonRow: ResponseGuard = value => record(value) && integer(value.line_index) && nullableString(value.description)
   && nullableString(value.po_number) && nullableInteger(value.po_line_number)
   && ['quantity_invoiced', 'quantity_ordered', 'quantity_received', 'quantity_previously_approved', 'quantity_available',
     'po_net_unit_price', 'invoice_net_unit_price', 'tolerance'].every(key => nullableDecimal(value[key]))
   && nullableString(value.invoice_currency) && nullableString(value.po_currency)
   && typeof value.association_status === 'string' && ['explicit', 'unresolved'].includes(value.association_status)
+  && priceBasisMetadata(value)
   && Array.isArray(value.findings)
   && value.findings.every(item => record(item) && typeof item.rule === 'string' && typeof item.message === 'string'
     && record(item.evidence) && ruleOutcome(item.evidence.outcome) && nullableString(item.evidence.po_number)

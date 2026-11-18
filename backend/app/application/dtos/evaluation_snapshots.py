@@ -59,6 +59,8 @@ def snapshot_input(command: EvaluateInvoiceCommand) -> dict:
             {"line_index": index, "method": method}
             for index, method in sorted(command.association_methods.items())
         ]
+    if command.price_basis is not None:
+        snapshot['price_basis'] = _json_value(command.price_basis)
     return snapshot
 
 

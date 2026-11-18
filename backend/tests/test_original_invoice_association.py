@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from app.application.dtos.invoice_documents import InvoiceDraft, InvoiceLineDraft
+from app.domain.matching.price_basis import AccountingEvidence
 from app.application.use_cases.import_reference_data import import_reference_data
 from app.infrastructure.reference_data.json_reader import read_reference_data
 from app.infrastructure.persistence.reference_data_repository import SqlReferenceDataRepository
@@ -27,7 +28,7 @@ CASES = (
 )
 
 
-@pytest.mark.parametrize('basis', ['unknown', 'net'])
+@pytest.mark.parametrize('basis', ['unknown', 'net', 'arithmetic'])
 def test_original_documents_associate_without_rewriting_extracted_references(review, migrated_engine, basis):
     client, _, seed = review
     reference = read_reference_data(ROOT/'data/reference-data/reference-data')
@@ -35,11 +36,13 @@ def test_original_documents_associate_without_rewriting_extracted_references(rev
     admitted = []
     for index, supplier_id, number, day, subtotal, tax, total, po, descriptions, quantities, prices, amounts in CASES:
         supplier = next(item for item in reference.suppliers if item.supplier_id == supplier_id)
+        declared_basis = 'unknown' if basis == 'arithmetic' else basis
         lines = tuple(InvoiceLineDraft(text, Decimal(quantity), Decimal(price), Decimal(amount),
-                                       None, None, None, basis)
+                                       None, None, None, declared_basis)
                       for text, quantity, price, amount in zip(descriptions, quantities, prices, amounts))
         draft = InvoiceDraft(supplier.legal_name, supplier.tax_id, number, date.fromisoformat(day), None,
-                             (po,), 'USD', Decimal(subtotal), Decimal(tax), Decimal(total), lines)
+                             (po,), 'USD', Decimal(subtotal), Decimal(tax), Decimal(total), lines,
+                             AccountingEvidence(True, ()) if basis == 'arithmetic' else None)
         path = ROOT/f'data/invoices/invoices/INV-{index:02d}.{"png" if index == 3 else "pdf"}'
         content = path.read_bytes()
         case = seed(number, draft=draft, document=(path.name, content,
@@ -50,13 +53,18 @@ def test_original_documents_associate_without_rewriting_extracted_references(rev
         response = client.get(f'/review/{case}')
         assert response.status_code == 200
         value = response.json()
-        assert value['evaluation']['result']['final_status'] == ('Auto-Pay' if basis == 'net' else None)
+        assert value['evaluation']['result']['final_status'] == ('Auto-Pay' if basis != 'unknown' else None)
         assert value['evaluation']['input_snapshot']['associations'] == [
             {'line_index': index, 'po_number': po, 'po_line_number': index+1} for index in range(count)]
         assert value['extraction'] == value['original_extraction']
         assert all(line['po_number'] is None and line['po_line_number'] is None
-                   and line['unit_price_basis'] == basis for line in value['extraction']['lines'])
+                   and line['unit_price_basis'] == ('unknown' if basis == 'arithmetic' else basis)
+                   for line in value['extraction']['lines'])
         assert all(row['association_method'] == 'description' for row in value['comparison_rows'])
         assert all(result['outcome'] == 'PASS' for result in value['evaluation']['result']['rules']
                    if result['code'] in ('LINE_ASSOCIATION', 'QUANTITY'))
+        if basis == 'arithmetic':
+            assert all(row['effective_unit_price_basis'] == 'net' and row['unit_price_basis_source'] == 'arithmetic'
+                       for row in value['comparison_rows'])
+            assert all(rule['outcome'] == 'PASS' for rule in value['evaluation']['result']['rules'])
         assert client.get(value['document_url']).content == content

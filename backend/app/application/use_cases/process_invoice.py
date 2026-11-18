@@ -6,12 +6,13 @@ from datetime import datetime, timedelta, timezone
 import math
 
 from app.application.dtos.invoice_documents import InvoiceDraft, ValidatedDocument
-from app.application.dtos.invoice_evaluation import EvaluateInvoiceCommand
+from app.application.dtos.invoice_evaluation import EvaluateInvoiceCommand, PriceBasisEvidence
 from app.application.ports.invoice_documents import ExtractionError
 from app.application.ports.processing import StaleLease
 from app.application.use_cases.evaluate_invoice import EvaluateInvoiceUseCase
 from app.domain.entities import Invoice, InvoiceLine, PurchaseOrder
 from app.domain.matching.association import InvoiceLineIdentity, ResolvedAssociation, resolve_line_associations
+from app.domain.matching.price_basis import PriceLine, resolve_price_basis
 
 
 class BoundedOffload:
@@ -50,6 +51,16 @@ def resolve_draft_associations(draft: InvoiceDraft, purchase_orders: tuple[Purch
     return resolve_line_associations(identities, draft.po_references or (), purchase_orders)
 
 
+def resolve_draft_prices(draft: InvoiceDraft) -> PriceBasisEvidence:
+    """One interpretation for processing, reevaluation and fresh approval."""
+    lines = tuple(PriceLine(line.quantity, line.unit_price, line.line_total, line.unit_price_basis)
+                  for line in draft.lines)
+    resolution = resolve_price_basis(lines, draft.subtotal, draft.tax_amount, draft.total_amount,
+                                     draft.currency, draft.accounting_evidence)
+    return PriceBasisEvidence(tuple(line.unit_price_basis for line in draft.lines),
+                              draft.accounting_evidence, resolution)
+
+
 def evaluate_draft(transaction, job, clock, *, origin='document-extraction'):
     result = job.extraction
     draft = result.invoice if result and result.is_invoice else None
@@ -75,12 +86,13 @@ def evaluate_draft(transaction, job, clock, *, origin='document-extraction'):
     suppliers = [supplier for supplier in reference.suppliers if supplier.tax_id == draft.supplier_tax_id]
     supplier_id = suppliers[0].supplier_id if len(suppliers) == 1 else None
     resolved = resolve_draft_associations(draft, reference.purchase_orders)
+    basis = resolve_draft_prices(draft)
     net_prices = {index: line.unit_price for index, line in enumerate(draft.lines)
-                  if line.unit_price_basis == 'net'}
+                  if basis.resolution.lines[index].basis == 'net'}
     command = EvaluateInvoiceCommand(invoice, str(job.owner_id), supplier_id=supplier_id,
                                     associations={index: value.target for index, value in resolved.items()},
                                     association_methods={index: value.method for index, value in resolved.items()},
-                                    net_unit_prices=net_prices, origin=origin)
+                                    net_unit_prices=net_prices, price_basis=basis, origin=origin)
     record = EvaluateInvoiceUseCase(_BorrowedTransaction(transaction), clock=clock).execute(command)
     return record.invoice_id, record.evaluation_id, record.result.complete
 

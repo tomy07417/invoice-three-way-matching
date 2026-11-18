@@ -50,3 +50,49 @@ def test_persisted_accounting_facts_survive_get_corrections_and_noop_rejection(r
     assert after['extraction'] == corrected and after['revision'] == 1
     assert after['original_extraction'] == initial['original_extraction']
     assert after['extraction'].get('accounting_evidence') == initial['extraction'].get('accounting_evidence')
+
+
+def test_arithmetic_basis_is_shared_by_reevaluation_and_fresh_approval(review):
+    from test_review_api import decision
+    client, _, seed = review
+    draft = accounting_draft(AccountingEvidence(True, ()))
+    case = seed(draft=draft)
+    second = replace(draft, invoice_number='ACCOUNTING-2', subtotal=Decimal('40.00'),
+        tax_amount=Decimal('8.40'), total_amount=Decimal('48.40'),
+        lines=(replace(draft.lines[0], quantity=Decimal('4'), line_total=Decimal('40.00')),))
+    second_case = seed('ACCOUNTING-2', draft=second)
+    csrf = login(client, 'analyst')
+    initial = client.get(f'/review/{case}').json()
+    assert initial['evaluation']['result']['final_status'] == 'Auto-Pay'
+    assert initial['extraction'] == initial['original_extraction'] == review_value(draft)
+    assert initial['comparison_rows'][0]['unit_price_basis_source'] == 'arithmetic'
+    snapshot = deepcopy(initial['evaluation']['input_snapshot'])
+    reevaluated = client.post(f'/review/{case}/reevaluations', headers=headers(csrf, 0),
+        json={'comment': 'Recheck the same visible accounting facts'})
+    assert reevaluated.status_code == 200
+    after = reevaluated.json()
+    assert after['evaluation']['result']['final_status'] == 'Auto-Pay'
+    assert after['evaluation']['input_snapshot'] == snapshot
+    # P1 excludes the separately blocked automatic operational transition.
+    assert after['operational_state'] == 'REVIEW_REQUIRED' and after['payment_blocked']
+    approved = decision(client, csrf, case, 1)
+    assert approved.status_code == 200
+    assert approved.json()['operational_state'] == 'APPROVED'
+    assert not approved.json()['payment_blocked']
+    assert approved.json()['extraction'] == initial['extraction']
+    detail = client.get(f'/review/{second_case}').json()
+    # This evaluation predates consumption; approval must not trust its old balance.
+    assert detail['evaluation']['result']['final_status'] == 'Auto-Pay'
+    assert detail['comparison_rows'][0]['quantity_previously_approved'] == '0'
+    history = client.get(f'/review/{second_case}/history').json()
+    denied = decision(client, csrf, second_case, 0)
+    assert denied.status_code == 409
+    assert denied.json()['error']['code'] == 'insufficient_available_quantity'
+    assert client.get(f'/review/{second_case}/history').json() == history
+    assert client.get(f'/review/{second_case}').json() == detail
+    refreshed = client.post(f'/review/{second_case}/reevaluations', headers=headers(csrf, 0),
+        json={'comment': 'Observe the freshly consumed receipt quantities'})
+    assert refreshed.status_code == 200
+    assert refreshed.json()['evaluation']['result']['final_status'] == 'Held for Review'
+    assert refreshed.json()['comparison_rows'][0]['quantity_previously_approved'] == '2'
+    assert refreshed.json()['comparison_rows'][0]['quantity_available'] == '3'

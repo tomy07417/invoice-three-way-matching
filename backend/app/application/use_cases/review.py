@@ -10,7 +10,7 @@ from app.application.dtos.review import ReviewError, parse_review_draft, review_
 from app.application.dtos.review_comparison import comparison_rows
 from app.application.ports.auth import AuthError
 from app.application.ports.review import ReviewRepository
-from app.application.use_cases.process_invoice import evaluate_draft, resolve_draft_associations
+from app.application.use_cases.process_invoice import evaluate_draft, resolve_draft_associations, resolve_draft_prices
 from app.domain.matching.duplicates import normalize_invoice_number
 from app.domain.matching.types import LineAssociation
 from app.domain.review import PolicyError, approval_eligibility, authorize_decision, normalize_comment
@@ -170,12 +170,13 @@ class ReviewService:
             raise ReviewError('already_authorized', 'This supplier and invoice number already have an active payment authorization')
         purchase_orders = {po.po_number: po for po in reference.purchase_orders}
         resolved = resolve_draft_associations(draft, reference.purchase_orders)
+        basis = resolve_draft_prices(draft).resolution
         grouped = defaultdict(Decimal)
         for index, line in enumerate(draft.lines):
             association = resolved.get(index)
             if (association is None or line.quantity is None
                     or not line.quantity.is_finite() or line.quantity <= 0
-                    or line.unit_price_basis != 'net' or line.unit_price is None or line.unit_price <= 0):
+                    or basis.lines[index].basis != 'net' or line.unit_price is None or line.unit_price <= 0):
                 raise ReviewError('unresolved_line', 'Every line needs a reliable PO link and positive quantity/net price before approval')
             grouped[association.target] += line.quantity
         if not grouped:

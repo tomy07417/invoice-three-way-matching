@@ -7,6 +7,14 @@ from typing import Mapping
 
 from app.domain.entities import Invoice
 from app.domain.matching.types import EvaluationResult, LineAssociation, MatchingConfig
+from app.domain.matching.price_basis import AccountingEvidence, PriceBasisResolution
+
+
+@dataclass(frozen=True)
+class PriceBasisEvidence:
+    declared_bases: tuple[str, ...]
+    accounting_evidence: AccountingEvidence | None
+    resolution: PriceBasisResolution
 
 
 @dataclass(frozen=True)
@@ -19,6 +27,7 @@ class EvaluateInvoiceCommand:
     net_unit_prices: Mapping[int, Decimal] | None = None
     origin: str = "structured-input"
     association_methods: Mapping[int, str] | None = None
+    price_basis: PriceBasisEvidence | None = None
 
     def __post_init__(self) -> None:
         for value in (self.actor_id, self.origin):

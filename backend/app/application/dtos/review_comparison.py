@@ -99,6 +99,10 @@ def comparison_rows(
     receipts = context_snapshot.get("goods_received_notes")
     approved = context_snapshot.get("approved_quantities")
     normalized_findings = _findings(findings)
+    basis = input_snapshot.get('price_basis') or {}
+    resolution = basis.get('resolution') or {}
+    effective = resolution.get('lines') or []
+    declared = basis.get('declared_bases') or []
     rows = []
     for position, line in enumerate(invoice.get("lines") or []):
         index = line.get("line_index", position)
@@ -147,5 +151,10 @@ def comparison_rows(
         }
         if reliable and methods.get(index) in ('explicit', 'description'):
             row['association_method'] = methods[index]
+        if 0 <= index < len(effective) and index < len(declared):
+            row.update(declared_unit_price_basis=declared[index],
+                       effective_unit_price_basis=effective[index]['basis'],
+                       unit_price_basis_source=effective[index]['source'],
+                       price_basis_reason=resolution['reason'])
         rows.append(row)
     return rows
