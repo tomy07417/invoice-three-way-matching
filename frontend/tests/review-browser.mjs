@@ -13,6 +13,7 @@ assert.ok(!focus || focus === 'comparison', 'Only the comparison focus is suppor
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const backend = spawn(`${root}backend/.venv/bin/python`, [fileURLToPath(new URL('./intake-backend.py', import.meta.url))], {
   cwd: root, env: { PATH: '/usr/bin:/bin', PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1',
+    HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
     TEST_DATABASE_URL: process.env.TEST_DATABASE_URL, AP_REVIEW_FIXTURE: '1' }, stdio: ['ignore', 'pipe', 'pipe'],
 });
 let chrome;
@@ -45,7 +46,7 @@ async function verify() {
     if (path.startsWith('/api/backend/')) requests.push({ path, method: request.method });
   });
   cdp.on('Page.javascriptDialogOpening', ({ message }) => {
-    const known = /^(Confirm payment authorization|Reject invoice|Request credit note|Save correction, revoke|Reevaluation supersedes|Refresh discards)/.test(message);
+    const known = /^(Confirm payment authorization|Reject invoice|Request credit note|Save correction, revoke|Reevaluation preserves|Refresh discards)/.test(message);
     if (!known) errors.push('Unexpected confirmation');
     void cdp.send('Page.handleJavaScriptDialog', { accept: known });
   });
@@ -142,16 +143,17 @@ async function verify() {
   assert.equal(current.revision, 3); assert.equal(current.evaluation.result.final_status, 'Auto-Pay');
   assert.equal(Number(current.comparison_rows[0].quantity_previously_approved), 0);
   assert.equal(Number(current.comparison_rows[0].quantity_available), 5);
-  assert.equal(current.payment_blocked, true);
-  await fill('#review-comment', 'Approve current corrected version'); await click('Approve');
-  await cdp.wait(text('Payment authorized — not executed'));
-  current = await detail(first); assert.equal(current.revision, 4);
+  assert.equal(current.payment_blocked, false);
+  assert.equal(current.operational_state, 'APPROVED');
+  assert.equal(current.current_decision.actor_id, 'system:auto-pay');
+  await cdp.wait(text('Current automatic decision'));
+  assert.equal(await cdp.evaluate(`Array.from(document.querySelectorAll('button')).find(node=>node.textContent==='Approve').disabled`), true);
   assert.equal((await history(first)).events.filter(event => event.kind === 'decision' && event.current).length, 1);
   pass('correction preview, audited quantity release, decision block, deterministic reevaluation and preserved history');
 
   stage = 'stale correction recovery';
   const competing = structuredClone(current.extraction); competing.lines[0].description = 'Competing correction';
-  const external = await cdp.evaluate(`(async()=>{const s=await(await fetch('/api/backend/sessions/current')).json();return(await fetch('/api/backend/review/${first}',{method:'PATCH',headers:{'Content-Type':'application/json','X-CSRF-Token':s.csrf_token,'If-Match':'"4"'},body:JSON.stringify({invoice:${JSON.stringify(competing)},comment:'Competing correction'})})).status})()`);
+  const external = await cdp.evaluate(`(async()=>{const s=await(await fetch('/api/backend/sessions/current')).json();return(await fetch('/api/backend/review/${first}',{method:'PATCH',headers:{'Content-Type':'application/json','X-CSRF-Token':s.csrf_token,'If-Match':'"3"'},body:JSON.stringify({invoice:${JSON.stringify(competing)},comment:'Competing correction'})})).status})()`);
   assert.equal(external, 200);
   const before = await history(first);
   await click('Correct extraction'); await fill('#line-0-description', 'My stale correction');
@@ -172,6 +174,13 @@ async function verify() {
   await fill('#review-comment', 'Manager verified above-limit evidence'); await click('Approve'); await cdp.wait(text('Payment authorized — not executed'));
   assert.equal((await detail(managerCase)).operational_state, 'APPROVED');
   pass('server-enforced Analyst limit despite forged header, audited escalation and Manager resolution');
+
+  stage = 'automatic decision audit attribution';
+  await cdp.navigate(`${base}/audit/${first}`);
+  await cdp.wait(text('Automatic decision'));
+  assert.equal(await cdp.evaluate(`Array.from(document.querySelectorAll('article')).some(node =>
+    node.querySelector('h3')?.textContent === 'Automatic decision' && node.innerText.includes('Automatic matching'))`), true);
+  pass('automatic authorization remains explicitly system-attributed in historical Audit');
 
   stage = 'credit-note block, mobile and expired AP session';
   const note = await seed('note.png', first); await openCase(note);

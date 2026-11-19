@@ -29,3 +29,11 @@ test('audit filters retain inclusive offset timestamps and reject invalid fields
   form.delete('time_to'); form.set('kind', 'invented');
   assert.throws(() => state.auditFiltersFromForm(form), error => error.field === 'kind');
 });
+
+
+test('decision labels distinguish automatic authorization without relabeling humans or other events', () => {
+  assert.equal(state.auditEventLabel({ kind: 'decision', actor: { type: 'system' } }), 'Automatic decision');
+  assert.equal(state.auditEventLabel({ kind: 'decision', actor: { type: 'recorded' } }), 'Human decision');
+  assert.equal(state.auditEventLabel({ kind: 'approval_reversal', actor: { type: 'system' } }), 'Audited approval reversal');
+  assert.equal(state.AUDIT_LABELS.decision, 'Decision');
+});

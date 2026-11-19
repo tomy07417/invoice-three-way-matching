@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../../../lib/api';
 import type { AuditEvent, AuditFilters, AuditHistory } from '../../../lib/contracts';
-import { AUDIT_LABELS, AuditFilterError, auditActor, auditFiltersFromForm, auditValue } from '../../../lib/audit-state';
+import { AUDIT_LABELS, AuditFilterError, auditActor, auditEventLabel, auditFiltersFromForm, auditValue } from '../../../lib/audit-state';
 import { reviewError } from '../../../lib/review-state';
 import { useSession } from '../../../components/intake/session-gate';
 import { TimestampValue } from '../../../components/shared/format-value';
@@ -13,7 +13,7 @@ import { FilterForm, TableRegion, Timeline } from '../../../components/shared/wo
 
 function EventRecord({ event }: { event: AuditEvent }) {
   return <li><article aria-labelledby={`audit-event-${event.id}`}>
-    <h3 id={`audit-event-${event.id}`}>{AUDIT_LABELS[event.kind]}</h3>
+    <h3 id={`audit-event-${event.id}`}>{auditEventLabel(event)}</h3>
     <p><TimestampValue value={event.at} /> · {auditActor(event.actor)}</p>
     <p>{event.current ? 'Current version or active decision' : 'Historical / event record'}
       {event.revision !== null && ` · Case revision ${event.revision}`}

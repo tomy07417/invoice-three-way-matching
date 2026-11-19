@@ -36,7 +36,7 @@ export function DraftEditor({ initial, busy, onSave, onCancel, onDirty }: {
   }
   const changes = preview ? correctionChanges(initial, preview) : [];
   return <section className="panel" aria-label="Extraction correction"><h2>Correct extracted data</h2>
-    <p>These are invoice facts, not supplier master, PO or GRN edits. Saving revokes any prior authorization and releases its quantities with audit. A new evaluation and approval are required.</p>
+    <p>These are invoice facts, not supplier master, PO or GRN edits. Saving revokes any prior authorization and releases its quantities with audit. Reevaluation is required; a complete Auto-Pay result authorizes payment automatically unless blocked. No bank payment is executed.</p>
     <form ref={form} onSubmit={save} onInput={() => { onDirty(); setPreview(null); }}>
       <fieldset disabled={busy}><legend>Invoice headers</legend><div className="review-form-grid">
         {Object.entries(HEADER_LABELS).map(([key, label]) => <label key={key} htmlFor={`edit-${key}`}>{label}

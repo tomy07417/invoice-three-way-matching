@@ -78,3 +78,10 @@ test('role controls, stale recovery and local AP return paths remain explicit', 
   for (const path of ['/review', '/review/11111111-2222-4333-8444-555555555555']) assert.equal(intake.safeReturnPath(path), path);
   for (const path of ['/review.evil', '/review/%2f%2fattacker', '//attacker/review', '/review/../login']) assert.equal(intake.safeReturnPath(path), '/invoices');
 });
+
+
+test('current decision labels reserve automatic attribution for the server system identity', () => {
+  assert.equal(state.currentDecisionLabel('system:auto-pay'), 'Current automatic decision');
+  assert.equal(state.currentDecisionLabel('42'), 'Current human decision');
+  assert.equal(state.currentDecisionLabel('system:unverified'), 'Current human decision');
+});

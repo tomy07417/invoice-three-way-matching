@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../../../lib/api';
 import type { InvoiceDraft, ReviewAction, ReviewDetail, ReviewHistory } from '../../../lib/contracts';
 import { displayValue, isCancelled } from '../../../lib/intake-state';
-import { HEADER_LABELS, decisionConfirmation, requiredReviewComment, reviewError } from '../../../lib/review-state';
+import { HEADER_LABELS, currentDecisionLabel, decisionConfirmation, requiredReviewComment, reviewError } from '../../../lib/review-state';
 import { useSession } from '../../../components/intake/session-gate';
 import { DraftEditor } from '../../../components/review/draft-editor';
 import { MoneyValue, TimestampValue } from '../../../components/shared/format-value';
@@ -81,8 +81,8 @@ function ReviewCase({ id }: { id: string }) {
       const reason = requiredReviewComment(comment);
       setCommentError(null);
       if (action === 'reevaluate') void mutate(() => api.reevaluate(id, data.revision, reason, session.csrf_token),
-        'Reevaluation recorded. Review current evidence before making a new decision.',
-        'Reevaluation supersedes the current decision and revokes any existing approval. Continue?');
+        'Reevaluation recorded. Complete Auto-Pay is approved automatically unless a prior rejection or credit-note request blocks it.',
+        'Reevaluation preserves a human rejection until correction and revokes any existing approval. Complete Auto-Pay is approved automatically unless blocked. Continue?');
       else if (action === 'escalate') void mutate(() => api.escalate(id, data.revision, reason, session.csrf_token), 'Manager review requested and audited.');
       else void mutate(() => api.decide(id, data.revision, action, reason, session.csrf_token),
         'Human decision recorded with comment and audit.', decisionConfirmation(action));
@@ -114,7 +114,7 @@ function ReviewCase({ id }: { id: string }) {
       {data.eligibility.reason && <p>{data.eligibility.reason}</p>}
       {data.requires_reevaluation && <p role="status">Reevaluation required. Earlier evidence cannot authorize a decision.</p>}
       {data.credit_note_pending && <p role="status">Credit Note Requested: payment remains blocked while the request is pending.</p>}
-      {data.current_decision && <p>Current human decision: {data.current_decision.action.replaceAll('_', ' ')} — {data.current_decision.comment}</p>}
+      {data.current_decision && <p>{currentDecisionLabel(data.current_decision.actor_id)}: {data.current_decision.action.replaceAll('_', ' ')} — {data.current_decision.comment}</p>}
     </section>
     <div className="review-document-grid"><section className="panel"><h2>Private original</h2>
       <OriginalDocument invoiceId={id} title="Original invoice document" openLabel="Open original" preview download />

@@ -2,10 +2,14 @@ import type { AuditEvent, AuditFilters, AuditKind, JsonValue } from './contracts
 
 export const AUDIT_LABELS: Record<AuditKind, string> = {
   creation: 'Invoice created', extraction: 'Extraction', evaluation: 'Automatic evaluation',
-  correction: 'Extraction correction', reevaluation: 'Reevaluation', decision: 'Human decision',
+  correction: 'Extraction correction', reevaluation: 'Reevaluation', decision: 'Decision',
   escalation: 'Manager escalation', credit_note_request: 'Credit note request',
   state_change: 'Operational state change', approval_reversal: 'Audited approval reversal',
 };
+export function auditEventLabel(event: Pick<AuditEvent, 'kind' | 'actor'>): string {
+  if (event.kind === 'decision') return event.actor.type === 'system' ? 'Automatic decision' : 'Human decision';
+  return AUDIT_LABELS[event.kind];
+}
 export function auditValue(value: JsonValue | undefined, known = true): string {
   if (!known) return 'Not recorded';
   if (value === null || value === undefined) return 'Unknown';

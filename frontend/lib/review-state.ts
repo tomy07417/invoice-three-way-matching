@@ -13,6 +13,9 @@ export const LINE_LABELS = {
 } as const;
 const decimalFields = new Set(['subtotal', 'tax_amount', 'total_amount', 'quantity', 'unit_price', 'line_total']);
 
+export function currentDecisionLabel(actorId: string): string {
+  return actorId === 'system:auto-pay' ? 'Current automatic decision' : 'Current human decision';
+}
 export function isAP(role: string): boolean { return role === 'ap_analyst' || role === 'ap_manager'; }
 export function decisionConfirmation(action: ReviewAction): string {
   const messages: Record<ReviewAction, string> = {
