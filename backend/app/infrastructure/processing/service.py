@@ -80,12 +80,16 @@ class InvoiceService:
 
     def snapshot(self, job):
         retryable = job.state in ('QUEUED', 'EXTRACTING', 'EXTRACTED', 'EVALUATING', 'RETRY_WAIT')
-        return public_value(dict(invoice_id=job.invoice_id, job_id=job.job_id,
+        data = public_value(dict(invoice_id=job.invoice_id, job_id=job.job_id,
                                  processing_status=job.state, attempts=job.attempts,
                                  next_eligible_at=job.next_eligible_at, created_at=job.created_at,
                                  updated_at=job.updated_at, automatic_outcome=None,
                                  error=(dict(code=job.error_code, message='Processing could not finish this attempt',
                                              retryable=retryable) if job.error_code else None)))
+        if job.document_validation is not None:
+            data['document_validation'] = public_value(job.document_validation)
+            data['automatic_outcome'] = job.document_validation['automatic_outcome']
+        return data
 
     async def list(self, token, *, status=None, offset=0, limit=20):
         actor = await self._actor(token)
@@ -121,9 +125,13 @@ class InvoiceService:
         data['extraction'] = (public_value(dict(is_invoice=job.extraction.is_invoice,
                                                invoice=job.extraction.invoice,
                                                warnings=job.extraction.warnings)) if job.extraction else None)
+        if job.extraction is not None and job.extraction.document_type is not None:
+            data['extraction']['document_type'] = job.extraction.document_type
         data['evaluation'] = None
         data['findings'] = []
-        if job.evaluation_id is not None:
+        if job.document_validation is not None:
+            data['findings'] = public_value(job.document_validation['findings'])
+        elif job.evaluation_id is not None:
             def read():
                 with SqlAlchemyInvoiceEvaluationRepository(self.repository.engine).transaction() as tx:
                     return tx.get_evaluation(job.evaluation_id)
@@ -134,7 +142,9 @@ class InvoiceService:
                 data['findings'] = public_value(record.result.rules)
         elif job.state == 'EVALUATION_INCOMPLETE':
             data['findings'] = [dict(code='missing_evidence', outcome='PENDING',
-                                     reason='Document is not an invoice or required invoice facts are missing')]
+                                     reason=('Required invoice facts are missing; review the extracted fields.'
+                                             if job.extraction and job.extraction.document_type == 'invoice' else
+                                             'Document is not an invoice or required invoice facts are missing'))]
         return data
 
     async def processing(self, token, invoice_id):

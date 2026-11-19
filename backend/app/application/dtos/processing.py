@@ -52,6 +52,7 @@ class ProcessingJob:
     evaluation_id: int | None
     attempt_history: tuple[dict, ...]
     events: tuple[dict, ...]
+    document_validation: dict | None = None
 
 
 @dataclass(frozen=True)

@@ -61,8 +61,29 @@ def resolve_draft_prices(draft: InvoiceDraft) -> PriceBasisEvidence:
                               draft.accounting_evidence, resolution)
 
 
+def document_disposition(extraction):
+    """Deterministic intake validation, NOT a fabricated invoice evaluation.
+
+    Legacy false/null has no confirmed type and keeps its historical review path.
+    Persist this snapshot once; readers must not reinterpret old decisions.
+    """
+    kind = extraction.document_type if extraction else None
+    if kind is None or kind == 'invoice':
+        return None
+    uncertain = kind == 'unknown'
+    reason = ('Document type is uncertain. Review the original document; Three-Way Matching was not run.'
+              if uncertain else f'Document type "{kind}" is not an invoice. Three-Way Matching was not run.')
+    return dict(policy_version='document-type-v1', document_type=kind,
+                automatic_outcome='Held for Review' if uncertain else 'Rejected',
+                operational_state='REVIEW_REQUIRED' if uncertain else 'REJECTED',
+                findings=[dict(code='DOCUMENT_TYPE_UNCERTAIN' if uncertain else 'INVALID_DOCUMENT_TYPE',
+                               outcome='HOLD' if uncertain else 'REJECT', reason=reason)])
+
+
 def evaluate_draft(transaction, job, clock, *, origin='document-extraction'):
     result = job.extraction
+    if document_disposition(result) is not None:
+        return None, None, False
     draft = result.invoice if result and result.is_invoice else None
     if draft is None:
         return None, None, False

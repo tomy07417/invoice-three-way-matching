@@ -52,8 +52,13 @@ null for missing or ambiguous fields, empty lines if none can be read, and
 warnings to preserve uncertainty. Preserve original text, exact decimal values
 as strings and dates as YYYY-MM-DD; do not calculate missing totals. Preserve
 raw PO references; give resolved PO/line numbers only when unambiguous. Use
-unit_price_basis unknown unless explicitly evidenced. For non-invoices return
-is_invoice false and invoice null. Do not include any payment classification.
+unit_price_basis unknown unless explicitly evidenced. Classify the visible document_type:
+invoice, quotation, purchase_order, delivery_note, credit_note, receipt, statement,
+other (confirmed non-invoice), or unknown (uncertain type). A quotation explicitly
+marked not an invoice is quotation, even when it contains prices and totals.
+For non-invoices or uncertain type return is_invoice false and invoice null.
+An identifiable invoice with missing facts remains invoice; leave its missing facts null.
+Do not include any payment classification.
 
 Return numeric values as strings with a dot as the decimal separator and no thousands/grouping separators.
 Use the visible document's consistent number formatting, not currency or supplier location, to distinguish separators.
@@ -137,7 +142,12 @@ def _parse_response(response):
             content[0].get("type") != "output_text" or type(content[0].get("text")) is not str):
         raise ValueError("Missing extraction text")
     is_invoice, invoice, warnings = parse_extraction(content[0]["text"])
-    return ExtractionResult(is_invoice, invoice, warnings, tokens, response_id)
+    classification = load_json(content[0]['text'])
+    kind = classification.get('document_type')
+    # Only absence is legacy. Explicit null is uncertain, even with invoice facts.
+    if 'document_type' in classification and kind is None:
+        kind = 'unknown'
+    return ExtractionResult(is_invoice, invoice, warnings, tokens, response_id, document_type=kind)
 
 
 class AzureOpenAIExtractor:

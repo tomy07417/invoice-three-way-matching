@@ -6,6 +6,7 @@ on unknown usage. Reported usage can increase, never decrease, the estimate.
 The worker must estimate *total* input plus maximum output before claiming.
 """
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -24,6 +25,8 @@ from app.application.dtos.invoice_documents import (
 from app.application.dtos.processing import ProcessingClaim, ProcessingConfig, ProcessingJob, ProcessingState
 from app.application.ports.processing import AdmissionRejected, StaleLease
 from app.application.use_cases.retry_policy import RetryPolicy
+from app.application.use_cases.process_invoice import document_disposition
+from app.application.dtos.automation import DOCUMENT_VALIDATOR
 from app.infrastructure.persistence.invoice_evaluation_repository import SqlAlchemyInvoiceEvaluationTransaction
 from app.infrastructure.persistence.processing_models import (
     ProcessingAttempt, ProcessingControl, ProcessingEvent, UploadCase,
@@ -42,6 +45,8 @@ def _json_result(result):
             return str(value)
         raise TypeError('Unsupported extraction value')
     value = asdict(result)
+    if value.get('document_type') is None:
+        value.pop('document_type', None)
     if value['invoice'] is not None and value['invoice'].get('accounting_evidence') is None:
         value['invoice'].pop('accounting_evidence', None)
     return json.loads(json.dumps(value, default=encode, allow_nan=False))
@@ -69,7 +74,8 @@ def _restore(value):
         invoice['accounting_evidence'] = parse_accounting_evidence(invoice.get('accounting_evidence'))
         invoice = InvoiceDraft(**invoice)
     usage = TokenUsage(**value['usage']) if value['usage'] is not None else None
-    return ExtractionResult(value['is_invoice'], invoice, tuple(value['warnings']), usage, value['response_id'])
+    return ExtractionResult(value['is_invoice'], invoice, tuple(value['warnings']), usage, value['response_id'],
+                            document_type=value.get('document_type'))
 
 
 class SqlProcessingRepository:
@@ -122,7 +128,8 @@ class SqlProcessingRepository:
             tuple(dict(number=a.number, started_at=a.started_at, finished_at=a.finished_at,
                        reserved_tokens=a.reserved_tokens, reported_tokens=a.reported_tokens,
                        error_code=a.error_code) for a in attempts),
-            tuple(dict(at=e.at, state=e.state, error_code=e.error_code) for e in events))
+            tuple(dict(at=e.at, state=e.state, error_code=e.error_code) for e in events),
+            document_validation=deepcopy((row.extraction or {}).get('document_validation')))
 
     def admit(self, actor, idempotency_key, storage_key, metadata, estimated_tokens):
         if (not isinstance(idempotency_key, str) or not 1 <= len(idempotency_key) <= 200
@@ -301,10 +308,17 @@ class SqlProcessingRepository:
             self._lock(session)
             now = self._now()
             row = self._fence(session, claim, now, 'EVALUATING')
-            raw_id, evaluation_id, complete = callback(
-                SqlAlchemyInvoiceEvaluationTransaction(session), self._snapshot(session, row))
-            if type(complete) is not bool or (complete and (raw_id is None or evaluation_id is None)):
-                raise ValueError('Complete processing requires linked evaluation evidence')
+            snapshot = self._snapshot(session, row)
+            validation = document_disposition(snapshot.extraction)
+            if validation is not None:
+                # A document disposition has no invoice/evaluation FK. It is
+                # never passed through matching or automatic payment approval.
+                raw_id, evaluation_id = None, None
+                complete = validation['automatic_outcome'] == 'Rejected'
+            else:
+                raw_id, evaluation_id, complete = callback(SqlAlchemyInvoiceEvaluationTransaction(session), snapshot)
+                if type(complete) is not bool or (complete and (raw_id is None or evaluation_id is None)):
+                    raise ValueError('Complete processing requires linked evaluation evidence')
             if evaluation_id is not None:
                 evaluation = SqlAlchemyInvoiceEvaluationTransaction(session).get_evaluation(evaluation_id)
                 if evaluation is None or evaluation.invoice_id != raw_id or evaluation.result.complete != complete:
@@ -312,12 +326,20 @@ class SqlProcessingRepository:
             # Fence again against clock expiry during a long callback. Any
             # staged evaluation writes roll back if the lease expired meanwhile.
             self._fence(session, claim, self._now(), 'EVALUATING')
+            if validation is not None:
+                row.extraction = {**row.extraction, 'document_validation': validation}
             row.raw_invoice_id = raw_id
             row.evaluation_id = evaluation_id
             row.lease_token = None
             row.lease_until = None
             self._event(session, row, 'COMPLETED' if complete else 'EVALUATION_INCOMPLETE', self._now())
-            if complete:
+            if validation is not None:
+                review = SqlReviewTransaction(session)
+                state = review.get_case(row.invoice_id)
+                review.ensure_case(state)
+                review.audit(state, DOCUMENT_VALIDATOR, 'document_validation',
+                             validation['findings'][0]['reason'], {'document_validation': validation}, now)
+            elif complete:
                 review = SqlReviewTransaction(session)
                 state = review.get_case(row.invoice_id)
                 if automatically_approve(review, state, evaluation, now):

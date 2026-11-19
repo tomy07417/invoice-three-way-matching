@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.application.dtos.audit import (
     AuditActor, AuditDiff, AuditError, AuditEvent, AuditProvenance, AuditSnapshot,
 )
-from app.application.dtos.automation import AUTO_APPROVER_ID
+from app.application.dtos.automation import AUTO_APPROVER_ID, DOCUMENT_VALIDATOR
 from app.application.dtos.invoice_documents import InvoiceDraft, InvoiceLineDraft
 from app.application.dtos.review import review_value
 from app.infrastructure.persistence.invoice_evaluation_repository import SqlAlchemyInvoiceEvaluationTransaction
@@ -50,7 +50,7 @@ def _diff(before, after, source, path=''):
 
 
 def _recorded(actor_id, name=None, role=None):
-    if actor_id == AUTO_APPROVER_ID:
+    if actor_id in (AUTO_APPROVER_ID, DOCUMENT_VALIDATOR.actor_id):
         return AuditActor(actor_id, name, None, 'system')
     return AuditActor(str(actor_id), name, role, 'recorded') if actor_id is not None else AuditActor()
 
@@ -181,7 +181,11 @@ class SqlAuditRepository:
         for row in audit_rows:
             actor = _recorded(row.actor_id, row.actor_name, row.actor_role)
             provenance = AuditProvenance('review_audit_events', str(row.id))
-            if row.kind == 'escalation':
+            if row.kind == 'document_validation':
+                events.append(AuditEvent(f'audit:{row.id}', 'document_validation', row.at, actor, provenance,
+                    revision=row.revision, current=True, comment=row.comment,
+                    evidence={'document_validation': deepcopy(row.payload['document_validation'])}))
+            elif row.kind == 'escalation':
                 events.append(AuditEvent(f'audit:{row.id}', 'escalation', row.at, actor, provenance,
                     revision=row.revision, comment=row.comment, evidence={'reason': row.payload.get('reason')}))
             elif row.kind == 'approval_reversal':

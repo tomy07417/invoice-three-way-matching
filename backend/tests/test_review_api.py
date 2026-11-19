@@ -48,7 +48,7 @@ def review(migrated_engine, request):
         with TestClient(app) as client:
             csrf = login(client)
             def seed(number='AP-1', quantity='2', total='24', currency='USD', *, explicit=True, basis='net',
-                     draft=None, document=None):
+                     draft=None, document=None, extraction=None):
                 # Price discrepancy produces a complete Held for Review without excess receipts.
                 if draft is None:
                     draft = InvoiceDraft('Supplier', 'tax', number, date(2026, 10, 2), None, ('PO-1',), currency,
@@ -63,7 +63,8 @@ def review(migrated_engine, request):
                                            headers={'X-CSRF-Token': csrf, 'Idempotency-Key': number})
                     assert response.status_code == 202
                     admitted = response.json()
-                process(repo, storage, now, ExtractionResult(True, draft, (), TokenUsage(1, 1)))
+                result = extraction if extraction is not None else ExtractionResult(True, draft, (), TokenUsage(1, 1))
+                process(repo, storage, now, result)
                 return admitted['invoice_id']
             yield client, app, seed
 

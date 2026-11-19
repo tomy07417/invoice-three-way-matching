@@ -17,3 +17,13 @@ class AutomaticApprover:
 
 
 AUTOMATIC_APPROVER = AutomaticApprover()
+
+
+@dataclass(frozen=True)
+class AutomaticDocumentValidator:
+    actor_id: str = 'system:document-validation'
+    username: str = 'Document validation'
+    role: _AutomationRole = _AutomationRole.SYSTEM
+
+
+DOCUMENT_VALIDATOR = AutomaticDocumentValidator()

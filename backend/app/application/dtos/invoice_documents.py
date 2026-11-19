@@ -82,3 +82,4 @@ class ExtractionResult:
     warnings: tuple[str, ...]
     usage: TokenUsage | None = None
     response_id: str | None = None
+    document_type: str | None = None  # Absent historical metadata is not confirmed non-invoice.

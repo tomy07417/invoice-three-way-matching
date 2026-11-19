@@ -181,9 +181,41 @@ def test_request_explains_decimal_separators_without_changing_extracted_values()
     assert result.usage.total_tokens == 30 and result.response_id == "resp_synthetic"
 
 
+@pytest.mark.parametrize('document_type,is_invoice', [('quotation', False), ('unknown', False), ('invoice', True)])
+def test_document_type_is_extracted_once_without_a_payment_decision(document_type, is_invoice):
+    result, requests = run_response(envelope(dict(is_invoice=is_invoice,
+        invoice=draft() if is_invoice else None, warnings=[], document_type=document_type)))
+    assert result.document_type == document_type
+    assert result.is_invoice is is_invoice
+    assert len(requests) == 1
+    payload = json.loads(requests[0].content)
+    assert 'document_type' in payload['text']['format']['schema']['required']
+    instructions = payload['input'][0]['content'][0]['text']
+    assert 'quotation' in instructions and 'unknown' in instructions
+    assert result.usage.total_tokens == 30
+
+
+@pytest.mark.parametrize('is_invoice', [False, True])
+def test_explicit_null_document_type_is_unknown_not_legacy_absence(is_invoice):
+    result, requests = run_response(envelope(dict(is_invoice=is_invoice,
+        invoice=draft() if is_invoice else None, warnings=[], document_type=None)))
+    assert result.document_type == 'unknown'
+    assert result.is_invoice is is_invoice
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize('document_type,is_invoice', [('quotation', True), ('invoice', False)])
+def test_contradictory_document_type_is_invalid_not_a_financial_decision(document_type, is_invoice):
+    with pytest.raises(ExtractionError) as caught:
+        run_response(envelope(dict(is_invoice=is_invoice, invoice=draft() if is_invoice else None,
+                                  warnings=[], document_type=document_type)))
+    assert caught.value.code == 'invalid_response'
+
+
 def test_noninvoice_and_all_missing_fields_remain_explicit():
     result, _ = run_response(envelope(dict(is_invoice=False, invoice=None, warnings=["not an invoice"])))
     assert not result.is_invoice and result.invoice is None and result.warnings == ("not an invoice",)
+    assert result.document_type is None  # Historical absence is not confirmed non-invoice.
     missing = {key: None for key in draft()}
     missing["lines"] = []
     result, _ = run_response(envelope(dict(is_invoice=True, invoice=missing, warnings=[])))

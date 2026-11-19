@@ -5,7 +5,7 @@ from typing import Literal
 from uuid import UUID
 
 AuditKind = Literal['creation', 'extraction', 'evaluation', 'correction', 'reevaluation',
-                    'decision', 'escalation', 'credit_note_request', 'state_change', 'approval_reversal']
+                    'decision', 'escalation', 'credit_note_request', 'state_change', 'approval_reversal', 'document_validation']
 AUDIT_KINDS = frozenset(AuditKind.__args__)
 
 

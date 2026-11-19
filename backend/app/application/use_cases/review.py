@@ -47,6 +47,10 @@ class ReviewService:
         draft = state['extraction'] or {}
         total = Decimal(draft['total_amount']) if draft.get('total_amount') is not None else None
         eligibility = approval_eligibility(actor.role.value, total, draft.get('currency'), self._limit(record))
+        validation = state.get('document_validation')
+        if validation is not None:
+            eligibility = {**eligibility, 'allowed': False, 'requires_manager': False,
+                           'reason': validation['findings'][0]['reason']}
         result = {key: state[key] for key in ('invoice_id', 'revision', 'extraction_version', 'extraction',
                   'original_extraction', 'operational_state', 'payment_blocked', 'credit_note_pending',
                   'requires_reevaluation', 'created_at', 'updated_at')}
@@ -54,6 +58,8 @@ class ReviewService:
                       record.context_snapshot, record.result.rules) if record else []),
                       current_decision=tx.get_decision(state['current_decision_id']), eligibility=eligibility,
                       document_url=f"/invoices/{state['invoice_id']}/document")
+        if validation is not None:
+            result['document_validation'] = validation
         return review_value(result)
 
     def detail(self, token, invoice_id):
@@ -77,14 +83,28 @@ class ReviewService:
                 view = self._view(tx, state, actor)
                 draft = state['extraction'] or {}
                 record = tx.get_evaluation(state['evaluation_id'])
+                validation = state.get('document_validation')
                 items.append(dict(invoice_id=str(state['invoice_id']), revision=state['revision'],
                     **{key: draft.get(key) for key in ('invoice_number', 'supplier_name', 'invoice_date', 'total_amount', 'currency')},
                     operational_state=state['operational_state'], payment_blocked=state['payment_blocked'],
-                    automatic_outcome=record.result.final_status if record else None,
-                    reasons=[rule.reason for rule in record.result.rules if rule.outcome != 'PASS'] if record else [],
+                    automatic_outcome=(validation['automatic_outcome'] if validation else
+                                       record.result.final_status if record else None),
+                    reasons=([item['reason'] for item in validation['findings']] if validation else
+                             [rule.reason for rule in record.result.rules if rule.outcome != 'PASS'] if record else []),
                     requires_manager=view['eligibility']['requires_manager'], created_at=state['created_at'],
                     age_seconds=max(0, int((now - state['created_at']).total_seconds()))))
         return review_value(dict(items=items, total=total, offset=filters.get('offset', 0), limit=filters.get('limit', 20)))
+
+    @staticmethod
+    def _document_guard(state, action):
+        validation = state.get('document_validation')
+        if validation is None:
+            return
+        # An uncertain document can be rejected/escalated by a human, but field
+        # edits or reevaluation cannot silently upgrade its classification.
+        if validation['document_type'] == 'unknown' and action in ('reject', 'escalate'):
+            return
+        raise ReviewError('document_type_blocked', validation['findings'][0]['reason'])
 
     @staticmethod
     def _locked(tx, invoice_id, expected):
@@ -119,6 +139,7 @@ class ReviewService:
         at = self.clock()
         with self.repository.transaction(write=True) as tx:
             state = self._locked(tx, invoice_id, expected)
+            self._document_guard(state, 'correct')
             if review_value(draft) == state['extraction']:
                 raise ReviewError('unchanged_correction', 'The correction must change invoice data', 422)
             self._invalidate(tx, state, actor, comment, at)
@@ -135,6 +156,7 @@ class ReviewService:
         at = self.clock()
         with self.repository.transaction(write=True) as tx:
             state = self._locked(tx, invoice_id, expected)
+            self._document_guard(state, 'reevaluate')
             decision = tx.get_decision(state['current_decision_id'])
             preserve_rejection = decision is not None and decision['action'] == 'reject'
             if not preserve_rejection:
@@ -162,6 +184,7 @@ class ReviewService:
         at = self.clock()
         with self.repository.transaction(write=True) as tx:
             state = self._locked(tx, invoice_id, expected)
+            self._document_guard(state, action)
             if state['requires_reevaluation']:
                 raise ReviewError('reevaluation_required', 'Reevaluate the corrected extraction before making a decision')
             if state['current_decision_id'] is not None:

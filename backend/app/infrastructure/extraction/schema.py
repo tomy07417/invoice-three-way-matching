@@ -43,6 +43,8 @@ INVOICE_SCHEMA = object_schema({
     'accounting_evidence': ACCOUNTING_SCHEMA,
 })
 EXTRACTION_SCHEMA = object_schema({
+    "document_type": nullable({"type": "string", "enum": ["invoice", "quotation", "purchase_order",
+        "delivery_note", "credit_note", "receipt", "statement", "other", "unknown"]}),
     "is_invoice": {"type": "boolean"}, "invoice": nullable(INVOICE_SCHEMA),
     "warnings": {"type": "array", "items": {"type": "string"}},
 })
@@ -99,11 +101,15 @@ def parse_extraction(text):
     data = load_json(text)
     # Accept the original contract on historical/mock responses. Absence is
     # unknown, never an empty adjustment list or permission to infer.
-    if isinstance(data, dict) and isinstance(data.get('invoice'), dict):
-        data['invoice'].setdefault('accounting_evidence', None)
+    if isinstance(data, dict):
+        data.setdefault('document_type', None)
+        if isinstance(data.get('invoice'), dict):
+            data['invoice'].setdefault('accounting_evidence', None)
     _validate(data, EXTRACTION_SCHEMA)
     if data["is_invoice"] != (data["invoice"] is not None):
         raise ValueError("Inconsistent invoice classification")
+    if data['document_type'] not in (None, 'unknown') and data['is_invoice'] != (data['document_type'] == 'invoice'):
+        raise ValueError("Inconsistent document type")
     if data["invoice"] is None:
         return False, None, tuple(data["warnings"])
     fields = dict(data["invoice"])

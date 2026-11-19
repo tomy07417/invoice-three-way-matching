@@ -10,7 +10,7 @@ from copy import deepcopy
 from datetime import timedelta
 from decimal import Decimal
 
-from sqlalchemy import Numeric, case, exists, func, select, text
+from sqlalchemy import Numeric, case, exists, func, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -61,17 +61,19 @@ class SqlReviewTransaction:
         version = (self.session.get(ReviewExtractionVersion, (invoice_id, state.extraction_version))
                    if state is not None else None)
         original = (upload.extraction or {}).get('invoice')
+        validation = deepcopy((upload.extraction or {}).get('document_validation'))
         return dict(invoice_id=invoice_id, revision=state.revision if state else 0,
                     extraction_version=state.extraction_version if state else 1,
                     evaluation_id=state.evaluation_id if state else upload.evaluation_id,
                     current_decision_id=state.current_decision_id if state else None,
-                    operational_state=state.operational_state if state else 'REVIEW_REQUIRED',
+                    operational_state=state.operational_state if state else (
+                        validation['operational_state'] if validation else 'REVIEW_REQUIRED'),
                     payment_blocked=state.payment_blocked if state else True,
                     credit_note_pending=state.credit_note_pending if state else False,
                     updated_at=state.updated_at if state else upload.updated_at,
                     created_at=upload.created_at, owner_id=upload.owner_id,
                     extraction=deepcopy(version.draft if version else original),
-                    original_extraction=deepcopy(original),
+                    original_extraction=deepcopy(original), document_validation=validation,
                     raw_invoice_id=version.raw_invoice_id if version else upload.raw_invoice_id,
                     requires_reevaluation=state is not None and state.operational_state == 'REEVALUATION_REQUIRED')
 
@@ -202,7 +204,8 @@ class SqlReviewTransaction:
         query = query.outerjoin(InvoiceEvaluation, InvoiceEvaluation.id == effective_evaluation)
         query = query.where(UploadCase.state.in_(('COMPLETED', 'EVALUATION_INCOMPLETE')))
         if outcome != 'all':
-            query = query.where(InvoiceEvaluation.final_status == outcome)
+            query = query.where(or_(InvoiceEvaluation.final_status == outcome,
+                UploadCase.extraction['document_validation']['automatic_outcome'].as_string() == outcome))
         amount = draft['total_amount'].as_string().cast(Numeric)
         supplier_field = draft['supplier_name'].as_string()
         invoice_date = draft['invoice_date'].as_string()
@@ -223,7 +226,8 @@ class SqlReviewTransaction:
         if reason:
             query = query.where(exists(select(EvaluationRuleFinding.evaluation_id).where(
                 EvaluationRuleFinding.evaluation_id == effective_evaluation,
-                EvaluationRuleFinding.outcome != 'PASS', EvaluationRuleFinding.reason.ilike('%' + reason + '%'))))
+                EvaluationRuleFinding.outcome != 'PASS', EvaluationRuleFinding.reason.ilike('%' + reason + '%')))
+                | UploadCase.extraction['document_validation']['findings'].as_string().ilike('%' + reason + '%'))
         total = self.session.scalar(select(func.count()).select_from(query.subquery()))
         order = {'created_at': UploadCase.created_at, 'age': UploadCase.created_at,
                  'amount': amount, 'supplier': supplier_field, 'invoice_date': invoice_date}[sort]
