@@ -26,6 +26,13 @@ from app.infrastructure.persistence.review_models import (
 from app.infrastructure.persistence.review_visibility import active_approval_clause
 
 
+def lock_payment_context(session):
+    """Serialize balances before their RC snapshot; keep reference imports stable."""
+    session.execute(text('SELECT pg_advisory_xact_lock(78390401)'))
+    session.execute(text('LOCK TABLE suppliers, purchase_orders, purchase_order_lines, '
+                         'goods_received_notes, goods_received_note_lines IN SHARE MODE'))
+
+
 class ReviewEvaluationTransaction(SqlAlchemyInvoiceEvaluationTransaction):
     def __init__(self, session, version):
         super().__init__(session)
@@ -240,9 +247,7 @@ class SqlReviewRepository:
                     session.execute(text("SET LOCAL statement_timeout = '15s'"))
                     session.execute(text("SET LOCAL lock_timeout = '5s'"))
                     if write:
-                        session.execute(text('SELECT pg_advisory_xact_lock(78390401)'))
-                        session.execute(text('LOCK TABLE suppliers, purchase_orders, purchase_order_lines, '
-                                             'goods_received_notes, goods_received_note_lines IN SHARE MODE'))
+                        lock_payment_context(session)
                     yield SqlReviewTransaction(session)
         except SQLAlchemyError:
             raise ReviewError('review_unavailable', 'Review service is temporarily unavailable; refresh before retrying', 503) from None

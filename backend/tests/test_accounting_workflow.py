@@ -36,18 +36,18 @@ def test_persisted_accounting_facts_survive_get_corrections_and_noop_rejection(r
     extracted = intake.json()['extraction']['invoice']
     assert extracted.get('accounting_evidence') == initial['extraction'].get('accounting_evidence')
     history = client.get(f'/review/{case}/history').json()
-    unchanged = client.patch(f'/review/{case}', headers=headers(csrf, 0),
+    unchanged = client.patch(f'/review/{case}', headers=headers(csrf, initial['revision']),
         json={'invoice': initial['extraction'], 'comment': 'No change to accounting facts'})
     assert unchanged.status_code == 422
     assert unchanged.json()['error']['code'] == 'unchanged_correction'
     assert client.get(f'/review/{case}/history').json() == history
     assert client.get(f'/review/{case}').json() == initial
     corrected = deepcopy(initial['extraction']); corrected['due_date'] = '2026-12-01'
-    response = client.patch(f'/review/{case}', headers=headers(csrf, 0),
+    response = client.patch(f'/review/{case}', headers=headers(csrf, initial['revision']),
         json={'invoice': corrected, 'comment': 'Add the visible due date only'})
     assert response.status_code == 200
     after = client.get(f'/review/{case}').json()
-    assert after['extraction'] == corrected and after['revision'] == 1
+    assert after['extraction'] == corrected and after['revision'] == initial['revision'] + 1
     assert after['original_extraction'] == initial['original_extraction']
     assert after['extraction'].get('accounting_evidence') == initial['extraction'].get('accounting_evidence')
 
@@ -67,23 +67,19 @@ def test_arithmetic_basis_is_shared_by_reevaluation_and_fresh_approval(review):
     assert initial['extraction'] == initial['original_extraction'] == review_value(draft)
     assert initial['comparison_rows'][0]['unit_price_basis_source'] == 'arithmetic'
     snapshot = deepcopy(initial['evaluation']['input_snapshot'])
-    reevaluated = client.post(f'/review/{case}/reevaluations', headers=headers(csrf, 0),
+    reevaluated = client.post(f'/review/{case}/reevaluations', headers=headers(csrf, initial['revision']),
         json={'comment': 'Recheck the same visible accounting facts'})
     assert reevaluated.status_code == 200
     after = reevaluated.json()
     assert after['evaluation']['result']['final_status'] == 'Auto-Pay'
     assert after['evaluation']['input_snapshot'] == snapshot
-    # P1 excludes the separately blocked automatic operational transition.
-    assert after['operational_state'] == 'REVIEW_REQUIRED' and after['payment_blocked']
-    approved = decision(client, csrf, case, 1)
-    assert approved.status_code == 200
-    assert approved.json()['operational_state'] == 'APPROVED'
-    assert not approved.json()['payment_blocked']
-    assert approved.json()['extraction'] == initial['extraction']
+    assert after['operational_state'] == 'APPROVED' and not after['payment_blocked']
+    assert after['current_decision']['actor_id'] == 'system:auto-pay'
+    assert after['extraction'] == initial['extraction']
     detail = client.get(f'/review/{second_case}').json()
-    # This evaluation predates consumption; approval must not trust its old balance.
-    assert detail['evaluation']['result']['final_status'] == 'Auto-Pay'
-    assert detail['comparison_rows'][0]['quantity_previously_approved'] == '0'
+    # Initial automatic approval already consumes receipts; manual overrides still recheck them.
+    assert detail['evaluation']['result']['final_status'] == 'Held for Review'
+    assert detail['comparison_rows'][0]['quantity_previously_approved'] == '2'
     history = client.get(f'/review/{second_case}/history').json()
     denied = decision(client, csrf, second_case, 0)
     assert denied.status_code == 409

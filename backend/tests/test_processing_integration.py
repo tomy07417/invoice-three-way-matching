@@ -201,7 +201,9 @@ def test_exact_mapping_atomic_evaluation_and_restart(migrated_engine, basis, exp
                 record = detail['evaluation']
                 assert len(tx.list_evaluations(record['invoice_id'])) == 1
                 assert tx.get_invoice_history(exclude_invoice_id=record['invoice_id']) == ()
-                assert tx.get_approved_quantities(('PO-1',)) == {}
+                from app.domain.matching.types import LineAssociation
+                expected_approved = {LineAssociation('PO-1', 3): d('2')} if expected == 'Auto-Pay' else {}
+                assert tx.get_approved_quantities(('PO-1',)) == expected_approved
 
 
 def test_rate_limit_floor_exhaustion_and_queue_rejection(migrated_engine):

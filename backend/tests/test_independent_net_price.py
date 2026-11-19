@@ -68,7 +68,9 @@ def test_fresh_arithmetic_approval_cannot_reuse_receipts(review):
     first = seed("INDEPENDENT-1", draft=replace(draft, invoice_number="INDEPENDENT-1"))
     second = seed("INDEPENDENT-2", draft=replace(draft, invoice_number="INDEPENDENT-2"))
     csrf = login(client, "analyst")
-    assert decision(client, csrf, first, 0).status_code == 200
+    authorized = client.get(f"/review/{first}").json()
+    assert authorized["operational_state"] == "APPROVED" and not authorized["payment_blocked"]
+    assert authorized["current_decision"]["actor_id"] == "system:auto-pay"
     before = digest([client.get(f"/review/{second}").json(), client.get(f"/review/{second}/history").json()])
     denied = decision(client, csrf, second, 0)
     assert denied.status_code == 409

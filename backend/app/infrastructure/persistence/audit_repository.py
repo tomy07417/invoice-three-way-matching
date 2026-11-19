@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.application.dtos.audit import (
     AuditActor, AuditDiff, AuditError, AuditEvent, AuditProvenance, AuditSnapshot,
 )
+from app.application.dtos.automation import AUTO_APPROVER_ID
 from app.application.dtos.invoice_documents import InvoiceDraft, InvoiceLineDraft
 from app.application.dtos.review import review_value
 from app.infrastructure.persistence.invoice_evaluation_repository import SqlAlchemyInvoiceEvaluationTransaction
@@ -49,6 +50,8 @@ def _diff(before, after, source, path=''):
 
 
 def _recorded(actor_id, name=None, role=None):
+    if actor_id == AUTO_APPROVER_ID:
+        return AuditActor(actor_id, name, None, 'system')
     return AuditActor(str(actor_id), name, role, 'recorded') if actor_id is not None else AuditActor()
 
 

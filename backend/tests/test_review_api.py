@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from app.application.dtos.auth import Role
 from app.application.dtos.invoice_documents import ExtractionResult, InvoiceDraft, InvoiceLineDraft, TokenUsage
 from app.application.dtos.reference_data import ReferenceData
+from app.application.dtos.processing import ProcessingConfig
 from app.application.use_cases.import_reference_data import import_reference_data
 from app.application.use_cases.sessions import SessionService
 from app.domain.entities import Supplier, PurchaseOrder, PurchaseOrderLine, GoodsReceivedNote, GoodsReceivedNoteLine
@@ -27,7 +28,7 @@ from test_invoice_list import login, upload, process
 
 
 @pytest.fixture
-def review(migrated_engine):
+def review(migrated_engine, request):
     now = [datetime(2027, 1, 1, tzinfo=timezone.utc)]
     sessions = SessionService(SqlAuthRepository(migrated_engine))
     for username, role in [('owner', Role.INTAKE), ('analyst', Role.AP_ANALYST), ('manager', Role.AP_MANAGER)]:
@@ -38,7 +39,8 @@ def review(migrated_engine):
                        (PurchaseOrderLine(3, 'SKU', 'Item', Decimal('10'), Decimal('10')),)),),
         (GoodsReceivedNote('GRN-1', 'PO-1', date(2026, 10, 1), (GoodsReceivedNoteLine(3, Decimal('5')),)),))
     import_reference_data(reference, SqlReferenceDataRepository(migrated_engine))
-    repo = SqlProcessingRepository(migrated_engine, clock=lambda: now[0])
+    config = getattr(request, 'param', ProcessingConfig())
+    repo = SqlProcessingRepository(migrated_engine, config=config, clock=lambda: now[0])
     with TemporaryDirectory() as scratch:
         storage = LocalDocumentStorage(Path(scratch) / 'private')
         service = InvoiceService(sessions, repo, LocalDocumentValidator(), storage, estimated_tokens=100)

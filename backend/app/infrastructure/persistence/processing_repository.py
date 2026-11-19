@@ -290,9 +290,14 @@ class SqlProcessingRepository:
 
     def complete(self, claim, callback):
         with self._transaction() as session:
-            # Evaluation uses the same REPEATABLE READ snapshot as the existing
-            # evaluation repository. No network is permitted in the callback.
-            session.connection(execution_options={'isolation_level': 'REPEATABLE READ'})
+            # Initial completion can now authorize payment. Join AP serialization
+            # before reading balances; RC sees commits made while waiting for it.
+            # No network is permitted in this transaction/callback.
+            from app.application.use_cases.payment_authorization import automatically_approve
+            from app.infrastructure.persistence.review_repository import SqlReviewTransaction, lock_payment_context
+
+            session.connection(execution_options={'isolation_level': 'READ COMMITTED'})
+            lock_payment_context(session)
             self._lock(session)
             now = self._now()
             row = self._fence(session, claim, now, 'EVALUATING')
@@ -312,3 +317,9 @@ class SqlProcessingRepository:
             row.lease_token = None
             row.lease_until = None
             self._event(session, row, 'COMPLETED' if complete else 'EVALUATION_INCOMPLETE', self._now())
+            if complete:
+                review = SqlReviewTransaction(session)
+                state = review.get_case(row.invoice_id)
+                if automatically_approve(review, state, evaluation, now):
+                    state.update(revision=state['revision'] + 1, updated_at=now)
+                    review.store_case(state)
