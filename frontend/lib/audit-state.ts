@@ -5,6 +5,7 @@ export const AUDIT_LABELS: Record<AuditKind, string> = {
   correction: 'Extraction correction', reevaluation: 'Reevaluation', decision: 'Decision',
   escalation: 'Manager escalation', credit_note_request: 'Credit note request',
   state_change: 'Operational state change', approval_reversal: 'Audited approval reversal',
+  document_validation: 'Document validation',
 };
 export function auditEventLabel(event: Pick<AuditEvent, 'kind' | 'actor'>): string {
   if (event.kind === 'decision') return event.actor.type === 'system' ? 'Automatic decision' : 'Human decision';

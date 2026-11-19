@@ -2,6 +2,7 @@
 
 import type { FormEventHandler, ReactNode, Ref } from 'react';
 import { api } from '../../lib/api';
+import type { DocumentValidation } from '../../lib/contracts';
 import './workspace.css';
 
 /** Parent supplies the native table (including its caption, thead, th scopes and tbody). */
@@ -26,6 +27,19 @@ export function StatusBadge({ label, tone = 'neutral' }: {
 
 export function EvidencePanel({ title, children }: { title: string; children: ReactNode }) {
   return <section className="shared-evidence" aria-label={title}><h3>{title}</h3>{children}</section>;
+}
+
+/** Deterministic pre-matching disposition, never presented as an invoice evaluation. */
+export function DocumentValidationNotice({ validation }: { validation?: DocumentValidation }) {
+  if (!validation) return null;
+  return <EvidencePanel title="Document validation">
+    <p>Document type: <strong>{validation.document_type}</strong>{' · '}
+      <StatusBadge label={validation.automatic_outcome} tone={validation.automatic_outcome === 'Rejected' ? 'negative' : 'warning'} /></p>
+    <ul>{validation.findings.map(finding => <li key={finding.code}>
+      {finding.reason} <small>Rule: {finding.code}</small>
+    </li>)}</ul>
+    <p>Invoice field edits cannot change document classification. Review the original document; upload a confirmed invoice if necessary.</p>
+  </EvidencePanel>;
 }
 
 /** Semantic chronology; parent retains recorded ordering and supplies actor/time/evidence content. */

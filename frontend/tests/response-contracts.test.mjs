@@ -91,6 +91,28 @@ test('effective basis metadata is optional for history and validated when presen
   value.comparison_rows[0].unit_price_basis_source = 'guessed';
   await assert.rejects(api.reviewDetail(id), error => error instanceof ApiError && error.code === 'invalid_response');
 });
+for (const [method, base] of [['detail', detail], ['processing', processing], ['reviewDetail', review]]) {
+  test(`${method} validates a document disposition without inventing an evaluation`, async t => {
+    const { api, ApiError } = await loadTypeScript('../lib/api.ts');
+    const value = clone(base);
+    const validation = { policy_version: 'document-type-v1', document_type: 'quotation',
+      automatic_outcome: 'Rejected', operational_state: 'REJECTED', findings: [
+        { code: 'INVALID_DOCUMENT_TYPE', outcome: 'REJECT', reason: 'Quotation is not an invoice; matching was not run.' }] };
+    value.document_validation = validation;
+    if ('automatic_outcome' in value) value.automatic_outcome = 'Rejected';
+    if ('evaluation' in value) value.evaluation = null;
+    if ('processing_status' in value) value.processing_status = 'COMPLETED';
+    if (method === 'detail') { value.extraction = { is_invoice: false, invoice: null, warnings: [], document_type: 'quotation' }; value.findings = validation.findings; }
+    if (method === 'reviewDetail') { value.extraction = null; value.comparison_rows = []; value.operational_state = 'REJECTED'; }
+    t.mock.method(globalThis, 'fetch', async () => Response.json(value));
+    assert.deepEqual(await api[method](id), value);
+    validation.automatic_outcome = 'Auto-Pay';
+    await assert.rejects(api[method](id), error => error instanceof ApiError && error.code === 'invalid_response');
+    validation.automatic_outcome = 'Rejected';
+    validation.findings[0].outcome = 'PASS';
+    await assert.rejects(api[method](id), error => error instanceof ApiError && error.code === 'invalid_response');
+  });
+}
 const invalidCases = [
   ['currentSession', 'unknown role', v => { v.actor.role = 'admin'; }],
   ['login', 'nested actor type', v => { v.actor.actor_id = '1'; }],

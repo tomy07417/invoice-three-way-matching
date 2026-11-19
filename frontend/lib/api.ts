@@ -56,6 +56,8 @@ const nullableDecimal = (value: unknown) => value === null || decimal(value);
 const strings = (value: unknown) => Array.isArray(value) && value.every(item => typeof item === 'string');
 const uuid = (value: unknown) => typeof value === 'string'
   && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+const documentType = (value: unknown) => typeof value === 'string' && ['invoice', 'quotation', 'purchase_order',
+  'delivery_note', 'credit_note', 'receipt', 'statement', 'other', 'unknown'].includes(value);
 const processingState = (value: unknown) => typeof value === 'string' && ['QUEUED', 'EXTRACTING', 'EXTRACTED',
   'EVALUATING', 'COMPLETED', 'RETRY_WAIT', 'EXTRACTION_FAILED', 'EVALUATION_INCOMPLETE', 'PROCESSING_FAILED'].includes(value);
 const outcome = (value: unknown) => typeof value === 'string' && ['Auto-Pay', 'Rejected', 'Held for Review'].includes(value);
@@ -71,6 +73,8 @@ const session: ResponseGuard = value => record(value) && record(value.actor) && 
 const processingSnapshot: ResponseGuard = value => record(value) && uuid(value.invoice_id) && uuid(value.job_id)
   && processingState(value.processing_status) && integer(value.attempts) && typeof value.next_eligible_at === 'string'
   && typeof value.created_at === 'string' && typeof value.updated_at === 'string' && nullableOutcome(value.automatic_outcome)
+  && (value.document_validation === undefined || record(value.document_validation) && documentValidation(value.document_validation)
+    && value.automatic_outcome === value.document_validation.automatic_outcome)
   && (value.error === null || record(value.error) && typeof value.error.code === 'string'
     && typeof value.error.message === 'string' && typeof value.error.retryable === 'boolean');
 const invoiceSummary: ResponseGuard = value => record(value) && processingSnapshot(value)
@@ -97,6 +101,16 @@ const finding: ResponseGuard = value => record(value) && typeof value.code === '
   && typeof value.reason === 'string' && (value.po_number === undefined || nullableString(value.po_number))
   && (value.line_index === undefined || nullableInteger(value.line_index))
   && (value.po_line_number === undefined || nullableInteger(value.po_line_number));
+const documentValidation: ResponseGuard = value => {
+  if (!record(value) || value.policy_version !== 'document-type-v1' || !documentType(value.document_type)
+    || value.document_type === 'invoice' || !Array.isArray(value.findings) || value.findings.length !== 1) return false;
+  const uncertain = value.document_type === 'unknown';
+  return value.automatic_outcome === (uncertain ? 'Held for Review' : 'Rejected')
+    && value.operational_state === (uncertain ? 'REVIEW_REQUIRED' : 'REJECTED')
+    && value.findings.every(item => record(item) && finding(item)
+      && item.code === (uncertain ? 'DOCUMENT_TYPE_UNCERTAIN' : 'INVALID_DOCUMENT_TYPE')
+      && item.outcome === (uncertain ? 'HOLD' : 'REJECT'));
+};
 const ruleValues: ResponseGuard = value => record(value) && decimal(value.price_tolerance) && decimal(value.analyst_approval_limit);
 const evaluation: ResponseGuard = value => record(value) && integer(value.invoice_id) && integer(value.configuration_id)
   && typeof value.evaluated_at === 'string' && typeof value.actor_id === 'string' && typeof value.origin === 'string'
@@ -109,8 +123,10 @@ const invoiceDetail: ResponseGuard = value => record(value) && processingSnapsho
   && integer(value.document.byte_size) && typeof value.document.sha256 === 'string' && integer(value.document.page_count)
   && nullableInteger(value.document.pixel_width) && nullableInteger(value.document.pixel_height)
   && (value.extraction === null || record(value.extraction) && typeof value.extraction.is_invoice === 'boolean'
-    && (value.extraction.invoice === null || invoiceDraft(value.extraction.invoice)) && strings(value.extraction.warnings))
-  && (value.evaluation === null || evaluation(value.evaluation)) && Array.isArray(value.findings) && value.findings.every(finding);
+    && (value.extraction.invoice === null || invoiceDraft(value.extraction.invoice)) && strings(value.extraction.warnings)
+    && (value.extraction.document_type === undefined || documentType(value.extraction.document_type)))
+  && (value.evaluation === null || evaluation(value.evaluation)) && Array.isArray(value.findings) && value.findings.every(finding)
+  && (value.document_validation === undefined || value.evaluation === null);
 const processingDetail: ResponseGuard = value => record(value) && processingSnapshot(value)
   && Array.isArray(value.attempt_history) && value.attempt_history.every(attempt => record(attempt)
     && integer(attempt.number) && typeof attempt.started_at === 'string' && nullableString(attempt.finished_at)
@@ -144,6 +160,8 @@ const reviewDetail: ResponseGuard = value => record(value) && uuid(value.invoice
   && (value.original_extraction === null || invoiceDraft(value.original_extraction))
   && (value.evaluation === null || evaluation(value.evaluation)) && Array.isArray(value.comparison_rows)
   && value.comparison_rows.every(comparisonRow) && reviewState(value.operational_state)
+  && (value.document_validation === undefined || documentValidation(value.document_validation)
+    && value.evaluation === null && value.comparison_rows.length === 0 && value.payment_blocked === true)
   && typeof value.payment_blocked === 'boolean' && typeof value.credit_note_pending === 'boolean'
   && typeof value.requires_reevaluation === 'boolean' && record(value.eligibility)
   && typeof value.eligibility.allowed === 'boolean' && typeof value.eligibility.requires_manager === 'boolean'
@@ -178,7 +196,7 @@ const parameterHistory: ResponseGuard = value => record(value) && page(value) &&
     && (item.before === null || ruleValues(item.before)) && ruleValues(item.after) && nullableString(item.comment)
     && ['manager_change', 'bootstrap', 'historical_unknown'].includes(String(item.provenance)));
 const auditKinds = ['creation', 'extraction', 'evaluation', 'correction', 'reevaluation', 'decision',
-  'escalation', 'credit_note_request', 'state_change', 'approval_reversal'];
+  'escalation', 'credit_note_request', 'state_change', 'approval_reversal', 'document_validation'];
 const auditEvent: ResponseGuard = value => record(value) && typeof value.id === 'string'
   && auditKinds.includes(String(value.kind)) && nullableString(value.at) && record(value.actor)
   && nullableString(value.actor.id) && nullableString(value.actor.name) && nullableString(value.actor.role)

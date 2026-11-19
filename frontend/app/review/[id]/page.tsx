@@ -10,7 +10,7 @@ import { HEADER_LABELS, currentDecisionLabel, decisionConfirmation, requiredRevi
 import { useSession } from '../../../components/intake/session-gate';
 import { DraftEditor } from '../../../components/review/draft-editor';
 import { MoneyValue, TimestampValue } from '../../../components/shared/format-value';
-import { CommentField, EvidencePanel, OriginalDocument, StatusBadge, TableRegion, Timeline, TimelineEvent } from '../../../components/shared/workspace';
+import { CommentField, DocumentValidationNotice, EvidencePanel, OriginalDocument, StatusBadge, TableRegion, Timeline, TimelineEvent } from '../../../components/shared/workspace';
 import { confirmAction } from '../../../components/shared/confirmation';
 
 export default function ReviewCasePage() {
@@ -96,8 +96,10 @@ function ReviewCase({ id }: { id: string }) {
   }
   const blocked = busy || stale || loading;
   const decided = data?.current_decision !== null;
-  const canDecide = !!data && !blocked && !data.requires_reevaluation && !decided;
-  const canApprove = canDecide && data.eligibility.allowed && !data.credit_note_pending
+  const documentBlocked = !!data?.document_validation;
+  const documentRejected = data?.document_validation?.automatic_outcome === 'Rejected';
+  const canDecide = !!data && !blocked && !data.requires_reevaluation && !decided && !documentRejected;
+  const canApprove = canDecide && !documentBlocked && data.eligibility.allowed && !data.credit_note_pending
     && data.evaluation?.result.final_status != null && data.comparison_rows.length > 0
     && data.comparison_rows.every(row => row.association_status === 'explicit');
   return <main className="review-workspace"><Link href="/review">Back to AP queue</Link><h1>AP invoice review</h1>
@@ -107,7 +109,7 @@ function ReviewCase({ id }: { id: string }) {
     {stale && <p className="notice">Actions are paused. Refresh to review the latest version; do not blindly repeat a decision.</p>}
     {data && <><section className="panel"><h2>{data.extraction?.invoice_number ?? data.invoice_id}</h2>
       <p>Case revision <strong>{data.revision}</strong> · Extraction version {data.extraction_version}</p>
-      <dl><dt>Automatic outcome</dt><dd>{data.evaluation?.result.final_status ?? 'Incomplete — no final outcome'}</dd>
+      <dl><dt>Automatic outcome</dt><dd>{data.document_validation?.automatic_outcome ?? data.evaluation?.result.final_status ?? 'Incomplete — no final outcome'}</dd>
         <dt>Operational state</dt><dd><StatusBadge label={data.operational_state.replaceAll('_', ' ')} tone={data.payment_blocked ? 'warning' : 'positive'} /></dd>
         <dt>Payment</dt><dd>{data.payment_blocked ? 'Payment blocked' : 'Payment authorized — not executed'}</dd>
         <dt>Analyst limit</dt><dd><MoneyValue amount={data.eligibility.limit_amount} currency={data.eligibility.limit_currency} /> inclusive; other currencies require Manager, without FX.</dd></dl>
@@ -116,6 +118,7 @@ function ReviewCase({ id }: { id: string }) {
       {data.credit_note_pending && <p role="status">Credit Note Requested: payment remains blocked while the request is pending.</p>}
       {data.current_decision && <p>{currentDecisionLabel(data.current_decision.actor_id)}: {data.current_decision.action.replaceAll('_', ' ')} — {data.current_decision.comment}</p>}
     </section>
+    <DocumentValidationNotice validation={data.document_validation} />
     <div className="review-document-grid"><section className="panel"><h2>Private original</h2>
       <OriginalDocument invoiceId={id} title="Original invoice document" openLabel="Open original" preview download />
     </section><section className="panel"><h2>Original extraction versus current version</h2>
@@ -142,10 +145,10 @@ function ReviewCase({ id }: { id: string }) {
         <td><MoneyValue amount={row.po_net_unit_price} currency={row.po_currency} /></td><td><MoneyValue amount={row.invoice_net_unit_price} currency={row.invoice_currency} /></td>
         <td>{displayValue(row.tolerance)} (0.02 = 2%)</td><td><ul>{row.findings.filter(finding => finding.evidence.outcome !== 'PASS').map((finding, index) => <li key={index}>{finding.message}</li>)}</ul></td>
       </tr>)}</tbody></table></TableRegion>
-      {!data.comparison_rows.length && <p>No complete comparison evidence. Correct missing facts and reevaluate; no approval is implied.</p>}
+      {!data.comparison_rows.length && <p>{documentBlocked ? 'Three-Way Matching was not run for this document.' : 'No complete comparison evidence. Correct missing facts and reevaluate; no approval is implied.'}</p>}
       <EvidencePanel title="Rules requiring attention"><ul>{data.evaluation?.result.rules.filter(rule => rule.outcome !== 'PASS').map((rule, index) => <li key={index}>{rule.reason}</li>)}</ul></EvidencePanel>
     </section>
-    {!editing ? <button disabled={blocked} onClick={() => setEditing(true)}>Correct extraction</button>
+    {!editing ? <button disabled={blocked || documentBlocked} onClick={() => setEditing(true)}>Correct extraction</button>
       : <DraftEditor key={data.revision} initial={data.extraction} busy={blocked} onSave={saveCorrection}
           onDirty={() => setDirty(true)} onCancel={() => { setEditing(false); setDirty(false); }} />}
     <section className="panel"><h2>Human decision and reevaluation</h2>
@@ -155,9 +158,9 @@ function ReviewCase({ id }: { id: string }) {
       <p>Approval requires complete evidence, reliable associations and currently available receipts. Overrides cannot bypass these safeguards.</p>
       <div className="review-actions"><button onClick={() => act('approve')} disabled={!canApprove || editing}>Approve</button>
         <button onClick={() => act('reject')} disabled={!canDecide || editing}>Reject invoice</button>
-        <button onClick={() => act('request_credit_note')} disabled={!canDecide || editing}>Request credit note</button>
+        <button onClick={() => act('request_credit_note')} disabled={!canDecide || documentBlocked || editing}>Request credit note</button>
         <button onClick={() => act('escalate')} disabled={!canDecide || !data.eligibility.requires_manager || editing}>Request Manager review</button>
-        <button onClick={() => act('reevaluate')} disabled={blocked || editing}>Reevaluate</button></div>
+        <button onClick={() => act('reevaluate')} disabled={blocked || documentBlocked || editing}>Reevaluate</button></div>
     </section>
     {history && history.revision === data.revision && <section className="panel"><h2>Case history and audit</h2><Timeline label="Case history and audit" className="review-history">
       {history.events.map((event, index) => <TimelineEvent key={index}

@@ -3,6 +3,13 @@ export type DecimalString = string;
 export type ProcessingState = 'QUEUED' | 'EXTRACTING' | 'EXTRACTED' | 'EVALUATING'
   | 'COMPLETED' | 'RETRY_WAIT' | 'EXTRACTION_FAILED' | 'EVALUATION_INCOMPLETE' | 'PROCESSING_FAILED';
 export type AutomaticOutcome = 'Auto-Pay' | 'Rejected' | 'Held for Review';
+export type DocumentType = 'invoice' | 'quotation' | 'purchase_order' | 'delivery_note'
+  | 'credit_note' | 'receipt' | 'statement' | 'other' | 'unknown';
+export interface DocumentValidation {
+  policy_version: 'document-type-v1'; document_type: Exclude<DocumentType, 'invoice'>;
+  automatic_outcome: 'Rejected' | 'Held for Review'; operational_state: 'REJECTED' | 'REVIEW_REQUIRED';
+  findings: Finding[];
+}
 export interface Session {
   actor: { actor_id: number; username: string; role: 'intake' | 'ap_analyst' | 'ap_manager' };
   csrf_token: string;
@@ -17,6 +24,7 @@ export interface ProcessingSnapshot {
   created_at: string;
   updated_at: string;
   automatic_outcome: AutomaticOutcome | null;
+  document_validation?: DocumentValidation;
   error: { code: string; message: string; retryable: boolean } | null;
 }
 export interface InvoiceSummary extends ProcessingSnapshot {
@@ -89,7 +97,7 @@ export interface InvoiceDetail extends ProcessingSnapshot {
     byte_size: number; sha256: string; page_count: number;
     pixel_width: number | null; pixel_height: number | null;
   };
-  extraction: { is_invoice: boolean; invoice: InvoiceDraft | null; warnings: string[] } | null;
+  extraction: { is_invoice: boolean; invoice: InvoiceDraft | null; warnings: string[]; document_type?: DocumentType } | null;
   evaluation: Evaluation | null;
   findings: Finding[];
 }
@@ -111,7 +119,7 @@ export interface ParameterChange extends ParameterVersion {
 export interface ParameterHistory { items: ParameterChange[]; total: number; offset: number; limit: number }
 export interface ParameterUpdate { price_tolerance?: DecimalString; analyst_approval_limit?: DecimalString; comment?: string | null }
 export type AuditKind = 'creation' | 'extraction' | 'evaluation' | 'correction' | 'reevaluation'
-  | 'decision' | 'escalation' | 'credit_note_request' | 'state_change' | 'approval_reversal';
+  | 'decision' | 'escalation' | 'credit_note_request' | 'state_change' | 'approval_reversal' | 'document_validation';
 export interface AuditFilters {
   offset?: number; limit?: number; kind?: AuditKind; actor_id?: string; time_from?: string; time_to?: string;
 }
@@ -152,6 +160,7 @@ export interface ComparisonRow {
   price_basis_reason?: string;
 }
 export interface ReviewDetail {
+  document_validation?: DocumentValidation;
   invoice_id: string; revision: number; extraction_version: number;
   extraction: InvoiceDraft | null; original_extraction: InvoiceDraft | null;
   evaluation: Evaluation | null; comparison_rows: ComparisonRow[];

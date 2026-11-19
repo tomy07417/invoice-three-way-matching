@@ -10,7 +10,7 @@ import { useSession } from '../../../components/intake/session-gate';
 import { usePolling } from '../../../components/intake/use-polling';
 import { InvoiceStatus, ReadFeedback } from '../../../components/intake/status';
 import { MoneyValue } from '../../../components/shared/format-value';
-import { OriginalDocument, TableRegion } from '../../../components/shared/workspace';
+import { DocumentValidationNotice, OriginalDocument, TableRegion } from '../../../components/shared/workspace';
 
 const activeDetail = (invoice: InvoiceDetail) => isActive(invoice.processing_status);
 const HEADERS: [keyof Omit<InvoiceDraft, 'lines' | 'po_references' | 'accounting_evidence'>, string][] = [
@@ -52,6 +52,7 @@ export default function InvoiceDetailPage() {
     <ReadFeedback {...read} />
     {invoice && <>
       <InvoiceStatus invoice={invoice} />
+      <DocumentValidationNotice validation={invoice.document_validation} />
       {isActive(invoice.processing_status) && <section className="panel" aria-label="Scheduled processing">
         <p>Processing is already scheduled. This control only confirms existing active work; it does not restart terminal jobs, reset attempts or bring forward the next eligible time.</p>
         <button onClick={confirmRetry} disabled={retrying}>{retrying ? 'Confirming…' : 'Confirm scheduled retry'}</button>
@@ -61,7 +62,7 @@ export default function InvoiceDetailPage() {
         <OriginalDocument invoiceId={id} openLabel="View original" download={invoice.document.file_name} />
       </section>
       <section className="panel"><h2>Extracted headers</h2>
-        {!draft ? <p>No extracted invoice fields are available yet.</p> : <dl>
+        {!draft ? <p>{invoice.document_validation ? 'No confirmed invoice facts: matching was not run for this document.' : 'No extracted invoice fields are available yet.'}</p> : <dl>
           {HEADERS.map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{['subtotal', 'tax_amount', 'total_amount'].includes(key)
             ? <MoneyValue amount={draft[key]} currency={draft.currency} /> : displayValue(draft[key])}</dd></div>)}
           <dt>PO references</dt><dd>{draft.po_references?.length ? draft.po_references.join(', ') : '—'}</dd>
