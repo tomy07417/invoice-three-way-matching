@@ -50,9 +50,16 @@ def resolve_line_associations(
             if len(matches) == 1:
                 resolved[index] = ResolvedAssociation(matches[0], 'description')
             continue
-        # Partial structured identity is unresolved even if raw text could fill
-        # the missing half; removing a verified field must not enable approval.
-        if (line.po_number is None) != (line.po_line_number is None):
+        # A PO number is valid scope, not an incomplete product identity. Use
+        # its unique description when no line reference is printed. Recognized
+        # raw references still pass through the conflict checks below.
+        if line.po_number is not None and line.po_line_number is None and not raw:
+            scoped = [link for link in matches if link.po_number == line.po_number]
+            if len(scoped) == 1:
+                resolved[index] = ResolvedAssociation(scoped[0], 'description')
+            continue
+        # A line number without an authoritative PO remains partial evidence.
+        if line.po_number is None and line.po_line_number is not None:
             continue
         candidates = [link for link, _ in targets]
         if line.po_number is not None:

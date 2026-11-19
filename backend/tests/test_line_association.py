@@ -53,6 +53,7 @@ def test_multi_po_ambiguity_does_not_choose_first_or_unreferenced_order():
     {'po_number': 'PO-1', 'po_line_number': 3},
     {'po_line_reference': '3'},
     {'po_line_reference': 'PO-1/3'},
+    {'po_number': 'PO-1', 'po_line_reference': '3'},
 ])
 def test_valid_explicit_identity_precedes_description(evidence):
     result = resolve(('Paper A4 80g',), evidence={0: evidence})
@@ -65,10 +66,11 @@ def test_valid_explicit_identity_precedes_description(evidence):
     {'po_number': 'PO-1', 'po_line_number': 1},
     {'po_number': 'PO-1', 'po_line_number': 0},
     {'po_number': 'PO-1', 'po_line_number': True},
-    {'po_number': 'PO-1'},
+    {'po_number': 'PO-2'},
     {'po_line_number': 3},
     {'po_line_number': 3, 'po_line_reference': '3'},
-    {'po_number': 'PO-1', 'po_line_reference': '3'},
+    {'po_number': 'PO-1', 'po_line_reference': '9'},
+    {'po_number': 'PO-1', 'po_line_reference': 'unknown line'},
     {'po_line_reference': 'unknown line'},
     {'po_line_reference': '99'},
     pytest.param({'po_line_reference': '9' * 5000}, id='oversized-raw-reference'),
@@ -89,6 +91,18 @@ def test_explicit_target_disambiguates_duplicate_descriptions():
     result = resolve(('Paper A4 80g',), orders=(duplicate,),
                      evidence={0: {'po_number': 'PO-1', 'po_line_number': 9}})
     assert result[0].target == LineAssociation('PO-1', 9)
+
+
+def test_po_only_evidence_can_scope_a_unique_normalized_description():
+    result = resolve(('  PAPER\ta4 80g ',), evidence={0: {'po_number': 'PO-1'}})
+    assert result[0].target == LineAssociation('PO-1', 3)
+    assert result[0].method == 'description'
+
+
+def test_po_only_description_ambiguity_and_unreferenced_orders_remain_unresolved():
+    duplicate = order(descriptions=('Paper A4 80g', 'Paper A4 80g'))
+    assert resolve(('Paper A4 80g',), orders=(duplicate,), evidence={0: {'po_number': 'PO-1'}}) == {}
+    assert resolve(('Paper A4 80g',), evidence={0: {'po_number': 'PO-2'}}) == {}
 
 
 def test_shared_target_is_retained_for_existing_engine_quantity_aggregation():
