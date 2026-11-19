@@ -62,7 +62,8 @@ export function CommentField({ id, value, onChange, label = 'Comment', required 
 
 /** Same-origin authenticated stream only. API validates the UUID; no URL/srcDoc escape hatch.
  * Authorization/expiry remain enforced by the backend, not by this visual component.
- * Sandboxed native PDF rendering varies by browser; the authenticated link is always available.
+ * Native PDF rendering requires an unsandboxed frame. The document proxy restricts successful
+ * responses to PDF/PNG/JPEG with nosniff; the authenticated link remains the fallback.
  */
 export function OriginalDocument({ invoiceId, title = 'Original invoice', preview = false,
   openLabel = 'Open authenticated original', download }: {
@@ -74,6 +75,6 @@ export function OriginalDocument({ invoiceId, title = 'Original invoice', previe
     <a href={source} target="_blank" rel="noopener noreferrer">{openLabel}</a>
     {download !== undefined && <>{' · '}<a href={source} download={download}>Download original</a></>}
     <p>Access requires an authorized session. Preview availability depends on your browser.</p>
-    {preview && <iframe title={title} src={source} sandbox="" referrerPolicy="same-origin" />}
+    {preview && <iframe title={title} src={source} referrerPolicy="same-origin" />}
   </section>;
 }

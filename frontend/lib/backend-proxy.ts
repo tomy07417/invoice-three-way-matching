@@ -145,6 +145,14 @@ export async function proxyBackend(request: Request): Promise<Response> {
       return failure(502, 'upstream_redirect', 'Unexpected service response');
     }
     const responseHeaders = privateHeaders(upstream.headers);
+    // Native document frames must never render a successful HTML/SVG or unknown response.
+    if (path.endsWith('/document') && upstream.ok) {
+      const mediaType = upstream.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
+      if (!['application/pdf', 'image/png', 'image/jpeg'].includes(mediaType ?? '')) {
+        void upstream.body?.cancel();
+        return failure(502, 'unsupported_document_type', 'Original document could not be displayed safely', upstream.headers);
+      }
+    }
     if ((versionedPath || auditPath.test(path)) && upstream.headers.has('etag')) {
       responseHeaders.set('etag', upstream.headers.get('etag')!);
     }

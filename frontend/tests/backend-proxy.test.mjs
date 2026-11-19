@@ -17,7 +17,11 @@ function privateResponse(response) {
 test('allowlisted methods and UUID paths only; no upstream on rejected input', async t => {
   const { proxyBackend } = await load();
   let calls = 0;
-  t.mock.method(globalThis, 'fetch', async () => { calls++; return new Response('{}'); });
+  t.mock.method(globalThis, 'fetch', async url => {
+    calls++;
+    return new Response('{}', { headers: { 'content-type':
+      new URL(url).pathname.endsWith('/document') ? 'application/pdf' : 'application/json' } });
+  });
   for (const path of ['/sessions', '/sessions/current', '/invoices', `/invoices/${uuid}`,
     `/invoices/${uuid}/processing`, `/invoices/${uuid}/document`]) {
     const method = path === '/sessions' ? 'POST' : 'GET';
